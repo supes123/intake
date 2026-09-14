@@ -53,6 +53,17 @@ header.top{display:flex;justify-content:space-between;align-items:flex-end;gap:1
 .pill.over{background:var(--over-soft);color:var(--over)}
 .pill.none{background:var(--line);color:var(--muted)}
 /* today */
+.daynav{display:grid;grid-template-columns:auto 1fr auto;gap:8px;align-items:center}
+.daynav .pill{grid-column:1/-1;justify-self:start}
+.daytitle{text-align:center}
+.navbtn{font:inherit;font-size:24px;line-height:1;width:40px;height:40px;border-radius:50%;border:1px solid var(--line);background:var(--surface);color:var(--ink);cursor:pointer}
+.navbtn:disabled{opacity:.3;cursor:default}
+#view-today{touch-action:pan-y}
+#view-today.slide-l>.panel:first-child{animation:slideL .22s ease}
+#view-today.slide-r>.panel:first-child{animation:slideR .22s ease}
+@keyframes slideL{from{transform:translateX(24px);opacity:.4}to{transform:none;opacity:1}}
+@keyframes slideR{from{transform:translateX(-24px);opacity:.4}to{transform:none;opacity:1}}
+@media (prefers-reduced-motion:reduce){#view-today.slide-l>.panel:first-child,#view-today.slide-r>.panel:first-child{animation:none}}
 .today{display:grid;grid-template-columns:140px 1fr;gap:18px;align-items:center}
 @media (max-width:480px){.today{grid-template-columns:1fr}}
 .ring{position:relative;width:140px;height:140px;margin:0 auto}
@@ -154,7 +165,7 @@ details.help p{font-size:14px}
   <!-- TODAY -->
   <section class="view active" id="view-today">
     <div class="panel">
-      <div class="panel-h"><h2 id="todayTitle">Today</h2><span class="pill none" id="todayPill">nothing logged</span></div>
+      <div class="panel-h daynav"><button class="navbtn" id="dayPrev" type="button" aria-label="Previous day">‹</button><div class="daytitle"><h2 id="todayTitle">Today</h2><div class="muted small" id="todaySub"></div></div><button class="navbtn" id="dayNext" type="button" aria-label="Next day">›</button><span class="pill none" id="todayPill">nothing logged</span></div>
       <div class="today">
         <div class="ring">
           <svg viewBox="0 0 120 120" aria-hidden="true">
@@ -167,13 +178,13 @@ details.help p{font-size:14px}
       </div>
     </div>
     <div class="panel">
-      <div class="panel-h"><h2>Meals</h2><button class="btn ghost" id="goLog" type="button">+ Log a meal</button></div>
+      <div class="panel-h"><h2>Meals</h2><button class="btn ghost" id="goLog" type="button">+ Log for this day</button></div>
       <ul class="meals" id="todayMeals"></ul>
       <div class="empty" id="todayEmpty" hidden>Nothing yet. Tap <b>Log</b>, describe what you ate, and the ledger does the rest.</div>
     </div>
     <div class="panel">
       <div class="panel-h"><h2>Weight</h2><span class="muted small" id="lastWeight"></span></div>
-      <div class="row"><input type="number" step="0.1" inputmode="decimal" id="weightIn" placeholder="kg today"><button class="btn" id="weightSave" type="button" style="flex:0 0 auto">Save</button></div>
+      <div class="row"><input type="number" step="0.1" inputmode="decimal" id="weightIn" placeholder="kg"><button class="btn" id="weightSave" type="button" style="flex:0 0 auto">Save</button></div>
     </div>
   </section>
 
@@ -254,7 +265,7 @@ details.help p{font-size:14px}
       <div class="panel-h"><h2>Claude</h2><span class="pill none" id="apiPill">no key</span></div>
       <div style="display:grid;gap:10px">
         <label class="f"><span><b>Anthropic API key</b> — stays on this device only</span><input id="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="sk-ant-…"></label>
-        <label class="f"><span><b>Model</b></span><input id="apiModel" autocomplete="off" spellcheck="false" placeholder="claude-sonnet-4-5"></label>
+        <label class="f"><span><b>Model</b></span><input id="apiModel" autocomplete="off" spellcheck="false" placeholder="claude-sonnet-5"></label>
         <button class="btn" id="apiTest" type="button">Save and test</button>
         <p class="hint" id="apiInfo"></p>
       </div>
@@ -304,7 +315,7 @@ const ls={get(k,d){try{const v=localStorage.getItem(k);return v==null?d:JSON.par
 /* ============ state ============ */
 let S=ls.get("intake.state",null)||{version:1,updated:null,targets:{...DEFAULT_T},days:{},weights:{},processedInbox:[]};
 S.targets={...DEFAULT_T,...(S.targets||{})}; S.days=S.days||{}; S.weights=S.weights||{}; S.processedInbox=S.processedInbox||[];
-let cfg=ls.get("intake.cfg",{dbxKey:"",dbxFolder:"/Investments/AI models/Intake Ledger",apiKey:"",apiModel:"claude-sonnet-4-5"});
+let cfg=ls.get("intake.cfg",{dbxKey:"",dbxFolder:"/Investments/AI models/Intake Ledger",apiKey:"",apiModel:"claude-sonnet-5"});
 let tok=ls.get("intake.dbx",null); // {access, refresh, exp}
 let rev=ls.get("intake.rev",null);
 
@@ -330,9 +341,15 @@ function mergeState(a,b){
 
 /* ============ rendering ============ */
 function render(){renderToday();renderHistory();renderSettings();$("#dateLine").textContent=nice(today())+" · "+new Date().getFullYear();}
+let viewDate=today();
+function shiftDay(n){const d=parse(viewDate);d.setDate(d.getDate()+n);const k=iso(d);if(k>today())return;viewDate=k;const v=$("#view-today");v.classList.remove("slide-l","slide-r");void v.offsetWidth;v.classList.add(n<0?"slide-r":"slide-l");renderToday();}
 function renderToday(){
-  const T=S.targets, d=S.days[today()], t=d?dayTotals(d):null, k=t?t.kcal:0;
-  $("#todayTitle").textContent="Today";
+  if(viewDate>today())viewDate=today();
+  const T=S.targets, d=S.days[viewDate], t=d?dayTotals(d):null, k=t?t.kcal:0;
+  const diff=Math.round((parse(today())-parse(viewDate))/864e5);
+  $("#todayTitle").textContent=diff===0?"Today":diff===1?"Yesterday":nice(viewDate);
+  $("#todaySub").textContent=diff===0?nice(viewDate):diff===1?nice(viewDate):diff+" days ago";
+  $("#dayNext").disabled=diff===0;
   const pill=$("#todayPill");
   if(!t||!d.meals.length){pill.className="pill none";pill.textContent="nothing logged";}
   else{const over=k>T.kcal;pill.className="pill"+(over?" over":"");pill.textContent=over?fmt(k-T.kcal)+" kcal over":fmt(T.kcal-k)+" kcal left";}
@@ -343,7 +360,7 @@ function renderToday(){
   const rows=[["protein","Protein","g","var(--protein)",false],["carbs","Carbs","g","var(--carbs)",false],["fat","Fat","g","var(--fat)",false],["fibre","Fibre","g","var(--fibre)",false],["satfat","Sat fat","g","var(--faint)",true],["sugar","Sugar","g","var(--faint)",true],["sodium","Sodium","mg","var(--faint)",true]];
   $("#macros").innerHTML=rows.map(([key,lab,u,c,cap])=>{const v=t?t[key]:0,tg=T[key]||1,over=cap?v>tg:(key!=="fibre"&&v>tg*1.15);return `<div class="m"><span class="lab">${lab}</span><div class="bar"><i style="--c:${over?"var(--over)":c};width:${Math.min(100,v/tg*100).toFixed(0)}%"></i></div><span class="val num"><b>${fmt(v)}</b> / ${cap?"≤":""}${fmt(tg)} ${u}</span></div>`;}).join("");
   const ul=$("#todayMeals"); ul.innerHTML=d?mealsHtml(d,true):""; $("#todayEmpty").hidden=!!(d&&d.meals.length);
-  const w=Object.keys(S.weights).sort().pop(); $("#lastWeight").textContent=w?`${S.weights[w]} kg on ${nice(w)}`:"";
+  const wv=S.weights[viewDate]; const w=Object.keys(S.weights).filter(k=>k<=viewDate).sort().pop(); $("#lastWeight").textContent=wv?`${wv} kg`:(w?`last: ${S.weights[w]} kg on ${nice(w)}`:"");
 }
 function mealsHtml(d,del){return (d.meals||[]).map(m=>{const items=(m.items||[]);const rows=items.length?`<ul class="items">${items.map(it=>`<li><span>${esc(it.name)}${it.qty?` <span class="muted">${esc(it.qty)}</span>`:""}${it.source&&/label/i.test(it.source)?` <span class="tag">label</span>`:""}</span><span class="num muted">${fmt(it.kcal)} · P ${fmt(it.protein)} · C ${fmt(it.carbs)} · F ${fmt(it.fat)}</span></li>`).join("")}</ul>`:`<div class="desc">${esc(m.desc||"")}</div>`;
   return `<li><div class="mh"><div class="n">${esc(m.name||"Meal")}</div><div class="r num"><b>${fmt(m.kcal)}</b> kcal<br>P ${fmt(m.protein)} · C ${fmt(m.carbs)} · F ${fmt(m.fat)}</div></div>${rows}${del?`<button class="x" data-del="${d.date}|${m.id}" type="button">Remove</button>`:""}</li>`;}).join("");}
@@ -391,12 +408,17 @@ function renderSettings(){
 /* ============ tabs ============ */
 $$("nav.tabs button").forEach(b=>b.addEventListener("click",()=>showView(b.dataset.view)));
 function showView(v){$$(".view").forEach(x=>x.classList.toggle("active",x.id==="view-"+v));$$("nav.tabs button").forEach(x=>x.classList.toggle("active",x.dataset.view===v));window.scrollTo(0,0);if(v==="log")fillLogDates();}
-$("#goLog").addEventListener("click",()=>showView("log"));
+$("#goLog").addEventListener("click",()=>{showView("log");fillLogDates();if([...$("#logDate").options].some(o=>o.value===viewDate))$("#logDate").value=viewDate;});
+$("#dayPrev").addEventListener("click",()=>shiftDay(-1));$("#dayNext").addEventListener("click",()=>shiftDay(1));
+(()=>{const v=$("#view-today");let sx=0,sy=0,t0=0;
+  v.addEventListener("touchstart",e=>{const t=e.touches[0];sx=t.clientX;sy=t.clientY;t0=Date.now();},{passive:true});
+  v.addEventListener("touchend",e=>{const t=e.changedTouches[0];const dx=t.clientX-sx,dy=t.clientY-sy;if(Date.now()-t0>700)return;if(Math.abs(dx)>60&&Math.abs(dy)<50&&Math.abs(dx)>Math.abs(dy)*1.5){if(dx>0)shiftDay(-1);else shiftDay(1);}},{passive:true});
+  document.addEventListener("keydown",e=>{if(!$("#view-today").classList.contains("active")||/INPUT|TEXTAREA/.test(document.activeElement.tagName))return;if(e.key==="ArrowLeft")shiftDay(-1);if(e.key==="ArrowRight")shiftDay(1);});})();
 $("#toggleAll").addEventListener("click",e=>{const open=e.target.dataset.open!=="1";$$(".day").forEach(d=>d.open=open);e.target.dataset.open=open?"1":"0";e.target.textContent=open?"Collapse all":"Expand all";});
 document.addEventListener("click",e=>{const b=e.target.closest("[data-del]");if(!b)return;const [date,id]=b.dataset.del.split("|");const d=S.days[date];if(!d)return;if(!confirm("Remove this meal?"))return;d.meals=d.meals.filter(m=>m.id!==id);d.deleted=[...(d.deleted||[]),id];dirtyThenSync();});
 
 /* ============ weight ============ */
-$("#weightSave").addEventListener("click",()=>{const v=parseFloat($("#weightIn").value);if(!v||v<30||v>250)return alert("Enter a weight in kg.");S.weights[today()]=Math.round(v*10)/10;$("#weightIn").value="";dirtyThenSync();});
+$("#weightSave").addEventListener("click",()=>{const v=parseFloat($("#weightIn").value);if(!v||v<30||v>250)return alert("Enter a weight in kg.");S.weights[viewDate]=Math.round(v*10)/10;$("#weightIn").value="";dirtyThenSync();});
 
 /* ============ log: dictation ============ */
 const SR=window.SpeechRecognition||window.webkitSpeechRecognition; let rec=null, recOn=false, baseText="";
@@ -453,7 +475,7 @@ One item per distinct food or drink (a salad with dressing is two items: the sal
   const tools=[{name:"lookup_product",description:"Search the Open Food Facts database for a packaged product's label nutrition (per 100 g and serving size). Returns up to 6 matching products.",input_schema:{type:"object",properties:{query:{type:"string",description:"Brand and product name as printed on the pack, no quantities"},country:{type:"string",description:"Optional 2-letter country hint: gb, il, us"}},required:["query"]}}];
   const messages=prior?[...prior,{role:"user",content:"AMENDMENT to the estimate above: "+text+"\n\nApply this amendment and return the complete revised JSON for the whole day (all meals, not just the changed one). Keep every meal the amendment does not mention exactly as it was. Re-scale label values or re-estimate as needed. Use lookup_product again only if a product is newly named."}]:[{role:"user",content:text}]; let lookups=0;
   for(let round=0;round<6;round++){
-    const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"content-type":"application/json","x-api-key":cfg.apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:cfg.apiModel||"claude-sonnet-4-5",max_tokens:2000,system:sys,tools,messages})});
+    const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"content-type":"application/json","x-api-key":cfg.apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:cfg.apiModel||"claude-sonnet-5",max_tokens:2000,system:sys,tools,messages})});
     if(!r.ok){let m="";try{m=(await r.json()).error?.message||"";}catch{}throw new Error(r.status+" "+m);}
     const j=await r.json();
     if(j.stop_reason==="tool_use"){
@@ -516,12 +538,12 @@ $("#saveBtn").addEventListener("click",()=>{
   if(!pending)return; const d=ensureDay(pending.date), now=new Date().toISOString();
   pending.meals.forEach(m=>d.meals.push({...m,id:uid(),loggedAt:now,source:"app"}));
   if(pending.note){d.notes=pending.note;d.notesAt=now;}
-  pending=null;$("#amendText").value="";notice("#amendNotice","");$("#previewPanel").hidden=true;$("#logText").value="";dirtyThenSync();showView("today");
+  viewDate=pending.date;pending=null;$("#amendText").value="";notice("#amendNotice","");$("#previewPanel").hidden=true;$("#logText").value="";dirtyThenSync();showView("today");
 });
 
 /* ============ settings ============ */
 $("#targetsSave").addEventListener("click",()=>{$$("#targetForm input").forEach(i=>S.targets[i.dataset.t]=Math.max(0,Number(i.value)||0));S.targetsUpdated=new Date().toISOString();dirtyThenSync();});
-$("#apiTest").addEventListener("click",async()=>{cfg.apiKey=$("#apiKey").value.trim();cfg.apiModel=$("#apiModel").value.trim()||"claude-sonnet-4-5";ls.set("intake.cfg",cfg);$("#apiInfo").textContent="Testing…";
+$("#apiTest").addEventListener("click",async()=>{cfg.apiKey=$("#apiKey").value.trim();cfg.apiModel=$("#apiModel").value.trim()||"claude-sonnet-5";ls.set("intake.cfg",cfg);$("#apiInfo").textContent="Testing…";
   try{const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"content-type":"application/json","x-api-key":cfg.apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:cfg.apiModel,max_tokens:10,messages:[{role:"user",content:"Reply with OK"}]})});
     if(!r.ok){const j=await r.json().catch(()=>({}));throw new Error(j.error?.message||r.status);} $("#apiInfo").textContent="Key works with "+cfg.apiModel+".";}
   catch(e){$("#apiInfo").textContent="Test failed: "+e.message;} renderSettings();});
