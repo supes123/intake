@@ -127,11 +127,11 @@ label.f span b{color:var(--ink);font-weight:500}
 /* chart */
 #view-history .panel:first-child{touch-action:pan-y}
 .dots{display:flex;justify-content:center;gap:6px;margin-top:10px}
-.dots button{width:8px;height:8px;border-radius:50%;border:0;padding:0;background:var(--line);cursor:pointer}
-.dots button.on{background:var(--accent);width:18px;border-radius:4px}
+.dots button{width:10px;height:10px;border-radius:50%;border:0;padding:0;background:var(--line);cursor:pointer}
+.dots button.on{background:var(--accent);width:22px;border-radius:5px}
 .chart.slide-l{animation:slideL .22s ease}.chart.slide-r{animation:slideR .22s ease}
 .chart svg{width:100%;height:auto;display:block}
-.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin-top:8px}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:13px;color:var(--muted);margin-top:8px}
 .legend span::before{content:"";display:inline-block;width:10px;height:10px;border-radius:2px;background:var(--c);margin-right:6px;vertical-align:-1px}
 .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
 @media (max-width:520px){.stats{grid-template-columns:repeat(2,1fr)}}
@@ -245,10 +245,6 @@ details.help p{font-size:14px}
     <div class="panel" id="weightPanel" hidden>
       <div class="panel-h"><h2>Weight</h2><span class="muted small" id="weightTrend"></span></div>
       <div class="chart" id="weightChart"></div>
-    </div>
-    <div class="panel">
-      <div class="panel-h"><h2>Log</h2><button class="btn ghost" id="toggleAll" type="button">Expand all</button></div>
-      <div id="days"></div>
     </div>
   </section>
 
@@ -378,7 +374,7 @@ const METRICS=[
   {k:"fibre",label:"Fibre",unit:"g",c:"var(--fibre)",mode:"min",sub:"grams per day, target is a minimum"},
   {k:"satfat",label:"Saturated fat",unit:"g",c:"var(--fat)",mode:"max",sub:"grams per day, target is a ceiling"},
   {k:"sugar",label:"Sugar",unit:"g",c:"var(--carbs)",mode:"max",sub:"grams per day, target is a ceiling"},
-  {k:"sodium",label:"Sodium",unit:"mg",c:"var(--faint)",mode:"max",sub:"milligrams per day, target is a ceiling"}];
+  {k:"sodium",label:"Sodium",unit:"mg",c:"var(--protein)",mode:"max",sub:"milligrams per day, target is a ceiling"}];
 let chartIdx=0;
 function shiftChart(n){const el=$("#chart");chartIdx=(chartIdx+n+METRICS.length)%METRICS.length;el.classList.remove("slide-l","slide-r");void el.offsetWidth;el.classList.add(n>0?"slide-l":"slide-r");renderChart();}
 function niceTicks(max){const raw=max/4,pow=Math.pow(10,Math.floor(Math.log10(raw))),step=[1,2,2.5,5,10].map(m=>m*pow).find(v=>v>=raw);const out=[];for(let t=0;t<=max;t+=step)out.push(Math.round(t*100)/100);return out;}
@@ -386,15 +382,18 @@ function renderChart(){
   const T=S.targets, M=METRICS[chartIdx], tg=T[M.k]||0;
   const N=14, now=new Date(), pts=[];
   for(let i=N-1;i>=0;i--){const dt=new Date(now);dt.setDate(now.getDate()-i);const key=iso(dt);const d=S.days[key];pts.push({key,v:d&&d.meals.length?dayTotals(d)[M.k]:null});}
-  const W=680,H=214,L=46,R=10,Tp=20,B=28,iw=W-L-R,ih=H-Tp-B, maxV=Math.max(tg*1.3,...pts.map(p=>p.v||0))*1.05||1, y=v=>Tp+ih-(v/maxV)*ih, bw=iw/N, gap=bw*.22;
+  const W=680,H=420,L=58,R=14,Tp=34,B=50,iw=W-L-R,ih=H-Tp-B, maxV=Math.max(tg*1.3,...pts.map(p=>p.v||0))*1.05||1, y=v=>Tp+ih-(v/maxV)*ih, bw=iw/N, gap=bw*.22;
   const colour=v=>M.mode==="min"?(v>=tg?M.c:M.c+`" opacity=".38`):(v>tg?"var(--over)":M.c);
   let s=`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${M.label} per day, last 14 days">`;
-  niceTicks(maxV).forEach(t=>{s+=`<line x1="${L}" x2="${W-R}" y1="${y(t)}" y2="${y(t)}" stroke="var(--line)"/><text x="${L-6}" y="${y(t)+4}" text-anchor="end" font-size="11" fill="var(--muted)">${t>=1000?(t/1000)+"k":t}</text>`;});
+  niceTicks(maxV).forEach(t=>{s+=`<line x1="${L}" x2="${W-R}" y1="${y(t)}" y2="${y(t)}" stroke="var(--line)"/><text x="${L-6}" y="${y(t)+4}" text-anchor="end" font-size="16" fill="var(--muted)">${t>=1000?(t/1000)+"k":t}</text>`;});
   pts.forEach((p,i)=>{const x=L+i*bw+gap/2,w=bw-gap,dt=parse(p.key);
-    if(p.v!=null){const h=Math.max(2,y(0)-y(p.v));s+=`<rect x="${x.toFixed(1)}" y="${(y(0)-h).toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" rx="3" fill="${colour(p.v)}"><title>${nice(p.key)}: ${fmt(p.v)} ${M.unit}</title></rect>`;}
-    else s+=`<rect x="${x.toFixed(1)}" y="${(y(0)-3).toFixed(1)}" width="${w.toFixed(1)}" height="3" rx="1.5" fill="var(--faint)" opacity=".6"/>`;
-    s+=`<text x="${(x+w/2).toFixed(1)}" y="${H-9}" text-anchor="middle" font-size="11" fill="${i===N-1?"var(--ink)":"var(--muted)"}">${dow[dt.getDay()][0]}</text>`;});
-  if(tg)s+=`<line x1="${L}" x2="${W-R}" y1="${y(tg)}" y2="${y(tg)}" stroke="var(--ink)" stroke-dasharray="4 4"/><text x="${W-R}" y="${y(tg)-5}" text-anchor="end" font-size="11" fill="var(--ink)">${M.mode==="min"?"min":M.mode==="max"?"max":"target"} ${fmt(tg)}</text>`;
+    if(p.v!=null){const h=Math.max(3,y(0)-y(p.v));s+=`<rect x="${x.toFixed(1)}" y="${(y(0)-h).toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" rx="4" fill="${colour(p.v)}"><title>${nice(p.key)}: ${fmt(p.v)} ${M.unit}</title></rect>`;
+      const lbl=p.v>=10000?Math.round(p.v/1000)+"k":p.v>=1000&&M.k!=="kcal"?(p.v/1000).toFixed(1)+"k":fmt(p.v);
+      s+=`<text x="${(x+w/2).toFixed(1)}" y="${(y(0)-h-6).toFixed(1)}" text-anchor="middle" font-size="15" font-weight="600" fill="var(--ink)">${lbl}</text>`;}
+    else s+=`<rect x="${x.toFixed(1)}" y="${(y(0)-4).toFixed(1)}" width="${w.toFixed(1)}" height="4" rx="2" fill="var(--faint)" opacity=".6"/>`;
+    const last=i===N-1;
+    s+=`<text x="${(x+w/2).toFixed(1)}" y="${H-26}" text-anchor="middle" font-size="16" font-weight="${last?"700":"400"}" fill="${last?"var(--ink)":"var(--muted)"}">${dow[dt.getDay()][0]}</text><text x="${(x+w/2).toFixed(1)}" y="${H-7}" text-anchor="middle" font-size="14" fill="var(--muted)">${dt.getDate()}</text>`;});
+  if(tg)s+=`<line x1="${L}" x2="${W-R}" y1="${y(tg)}" y2="${y(tg)}" stroke="var(--ink)" stroke-width="1.5" stroke-dasharray="6 5"/><text x="${W-R}" y="${y(tg)-7}" text-anchor="end" font-size="15" font-weight="600" fill="var(--ink)">${M.mode==="min"?"min":M.mode==="max"?"max":"target"} ${fmt(tg)}</text>`;
   s+=`</svg>`;
   $("#chart").innerHTML=s;
   $("#chartTitle").textContent=M.label+" · 14 days"; $("#chartSub").textContent=M.sub;
@@ -416,10 +415,6 @@ function renderHistory(){
     p+=`<path d="${wk2.map((k,i)=>(i?"L":"M")+xs(i).toFixed(1)+" "+ys(S.weights[k]).toFixed(1)).join(" ")}" fill="none" stroke="var(--protein)" stroke-width="2"/>`;wk2.forEach((k,i)=>p+=`<circle cx="${xs(i)}" cy="${ys(S.weights[k])}" r="3.5" fill="var(--protein)"><title>${nice(k)}: ${S.weights[k]} kg</title></circle>`);
     p+=`<text x="${L2}" y="${H2-6}" font-size="11" fill="var(--muted)">${nice(wk2[0])}</text><text x="${W2-R2}" y="${H2-6}" text-anchor="end" font-size="11" fill="var(--muted)">${nice(wk2[wk2.length-1])}</text></svg>`;$("#weightChart").innerHTML=p;
     const ch=vals[vals.length-1]-vals[0];$("#weightTrend").textContent=(ch<=0?"−":"+")+Math.abs(ch).toFixed(1)+" kg since "+nice(wk2[0]);}
-  // days list
-  const el=$("#days"); if(!list.length){el.innerHTML='<div class="empty">No days logged yet.</div>';return;}
-  el.innerHTML=list.slice(0,90).map(d=>{const t=dayTotals(d),k=t.kcal,over=k>T.kcal,tot=t.protein*4+t.carbs*4+t.fat*9||1;
-    return `<details class="day"><summary><div><div style="font-weight:500">${nice(d.date)}</div><div class="muted num" style="font-size:12px">P ${fmt(t.protein)}g · C ${fmt(t.carbs)}g · F ${fmt(t.fat)}g · fibre ${fmt(t.fibre)}g</div><div class="mini" aria-hidden="true"><i style="background:var(--protein);width:${(t.protein*4/tot*100).toFixed(0)}%"></i><i style="background:var(--carbs);width:${(t.carbs*4/tot*100).toFixed(0)}%"></i><i style="background:var(--fat);width:${(t.fat*9/tot*100).toFixed(0)}%"></i></div></div><div style="text-align:right"><span class="num" style="font-weight:600;font-size:17px">${fmt(k)}</span><span class="muted small"> kcal</span><br><span class="pill${over?" over":""}">${over?"+"+fmt(k-T.kcal):"−"+fmt(T.kcal-k)}</span></div></summary><ul class="meals">${mealsHtml(d,true)}</ul>${d.notes?`<p class="hint" style="font-style:italic;margin:8px 0 0">${esc(d.notes)}</p>`:""}</details>`;}).join("");
 }
 function renderSettings(){
   $("#dbxKey").value=cfg.dbxKey||"";$("#dbxFolder").value=cfg.dbxFolder||"";$("#apiKey").value=cfg.apiKey||"";$("#apiModel").value=cfg.apiModel||"";
@@ -446,7 +441,6 @@ $("#dayPrev").addEventListener("click",()=>shiftDay(-1));$("#dayNext").addEventL
   $("#chartDots").addEventListener("click",e=>{const b=e.target.closest("[data-ci]");if(!b)return;const i=+b.dataset.ci;if(i!==chartIdx){const dir=i>chartIdx?1:-1;chartIdx=i-dir;shiftChart(dir);}});
   $("#chart").addEventListener("click",()=>shiftChart(1));
   document.addEventListener("keydown",e=>{if(!$("#view-history").classList.contains("active")||/INPUT|TEXTAREA/.test(document.activeElement.tagName))return;if(e.key==="ArrowLeft")shiftChart(-1);if(e.key==="ArrowRight")shiftChart(1);});})();
-$("#toggleAll").addEventListener("click",e=>{const open=e.target.dataset.open!=="1";$$(".day").forEach(d=>d.open=open);e.target.dataset.open=open?"1":"0";e.target.textContent=open?"Collapse all":"Expand all";});
 document.addEventListener("click",e=>{const b=e.target.closest("[data-del]");if(!b)return;const [date,id]=b.dataset.del.split("|");const d=S.days[date];if(!d)return;if(!confirm("Remove this meal?"))return;d.meals=d.meals.filter(m=>m.id!==id);d.deleted=[...(d.deleted||[]),id];dirtyThenSync();});
 
 /* ============ weight ============ */
