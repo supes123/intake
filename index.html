@@ -402,21 +402,46 @@ $("#estimateBtn").addEventListener("click",async()=>{
   finally{btn.disabled=false;btn.textContent="Estimate with Claude";}
 });
 async function estimate(text){
-  const sys=`You estimate nutrition from a spoken description of what someone ate. The description was dictated, so expect run-on text and mis-heard food names; interpret charitably (e.g. "koala" dressing is a mis-hearing of a brand). Portions: when vague, assume a normal adult portion, leaning slightly generous. Use McCance & Widdowson / USDA values and typical UK and Israeli home and restaurant portions. Alcohol counts at 7 kcal/g inside the meal's kcal. Keep kcal consistent with macros (4/4/9). Return ONLY JSON, no prose, in this exact shape:
-{"meals":[{"name":"Breakfast|Lunch|Dinner|Snack|Drinks","desc":"the items, tidied, with the portion you assumed","kcal":0,"protein":0,"carbs":0,"fat":0,"satfat":0,"fibre":0,"sugar":0,"sodium":0}],"note":"one short plain observation or empty string","assumption":"the single most consequential assumption you made, or empty string"}
+  const sys=`You estimate nutrition from a spoken description of what someone ate. The description was dictated, so expect run-on text and mis-heard food names; interpret charitably (e.g. "koala" dressing is a mis-hearing of a brand). 
+
+BRANDED PRODUCTS: whenever an item is a named commercial product (a brand, a supermarket own-label, a specific bar, drink, cereal, ready meal, sauce or dressing), call the lookup_product tool to get its label values from Open Food Facts instead of estimating. Search with the brand and product name as printed on the pack, without quantities ("Green & Black's dark 70%", "Hellmann's real mayonnaise", "Tnuva cottage cheese 5%"). Pick the result that best matches; if the first search misses, try once more with different wording, then fall back to your own estimate. Scale the per-100g label values to the quantity eaten (use serving_size or the pack quantity when the person says "a bar", "a pot", "a can"). Sodium: use sodium_100g (grams) x 1000, or salt_100g x 400. In desc, say which product record you used, e.g. "(label: Green & Black's Dark 70%, 45 g)". For unbranded or home-cooked food, estimate from McCance & Widdowson / USDA values and typical UK and Israeli home and restaurant portions. Portions: when vague, assume a normal adult portion, leaning slightly generous. Alcohol counts at 7 kcal/g inside the meal's kcal. Keep kcal consistent with macros (4/4/9).
+
+FINAL ANSWER: when done looking things up, return ONLY JSON, no prose, in this exact shape:
+{"meals":[{"name":"Breakfast|Lunch|Dinner|Snack|Drinks","desc":"the items, tidied, with the portion you assumed and any label source","kcal":0,"protein":0,"carbs":0,"fat":0,"satfat":0,"fibre":0,"sugar":0,"sodium":0}],"note":"one short plain observation or empty string","assumption":"the single most consequential assumption you made, or empty string"}
 Grams for protein/carbs/fat/satfat/fibre/sugar, milligrams for sodium, integers throughout. Only include meals the person mentioned.`;
-  const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"content-type":"application/json","x-api-key":cfg.apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:cfg.apiModel||"claude-sonnet-4-5",max_tokens:1500,system:sys,messages:[{role:"user",content:text}]})});
-  if(!r.ok){let m="";try{m=(await r.json()).error?.message||"";}catch{}throw new Error(r.status+" "+m);}
-  const j=await r.json(); const raw=(j.content||[]).map(c=>c.text||"").join("");
-  const m=raw.match(/\{[\s\S]*\}/); if(!m)throw new Error("No JSON in the reply");
-  const out=JSON.parse(m[0]); out.meals=(out.meals||[]).map(x=>{const o={name:x.name||"Meal",desc:x.desc||""};NUT.forEach(k=>o[k]=Math.max(0,Math.round(Number(x[k])||0)));return o;}); return out;
+  const tools=[{name:"lookup_product",description:"Search the Open Food Facts database for a packaged product's label nutrition (per 100 g and serving size). Returns up to 6 matching products.",input_schema:{type:"object",properties:{query:{type:"string",description:"Brand and product name as printed on the pack, no quantities"},country:{type:"string",description:"Optional 2-letter country hint: gb, il, us"}},required:["query"]}}];
+  const messages=[{role:"user",content:text}]; let lookups=0;
+  for(let round=0;round<6;round++){
+    const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"content-type":"application/json","x-api-key":cfg.apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:cfg.apiModel||"claude-sonnet-4-5",max_tokens:2000,system:sys,tools,messages})});
+    if(!r.ok){let m="";try{m=(await r.json()).error?.message||"";}catch{}throw new Error(r.status+" "+m);}
+    const j=await r.json();
+    if(j.stop_reason==="tool_use"){
+      messages.push({role:"assistant",content:j.content});
+      const results=[];
+      for(const c of j.content){if(c.type!=="tool_use")continue;lookups++;$("#estimateBtn").textContent="Looking up "+(c.input.query||"product")+"…";
+        let out;try{out=await lookupProduct(c.input.query,c.input.country);}catch(e){out={error:String(e.message||e)};}
+        results.push({type:"tool_result",tool_use_id:c.id,content:JSON.stringify(out)});}
+      messages.push({role:"user",content:results}); continue;
+    }
+    const raw=(j.content||[]).map(c=>c.text||"").join("");
+    const m=raw.match(/\{[\s\S]*\}/); if(!m)throw new Error("No JSON in the reply");
+    const out=JSON.parse(m[0]); out.meals=(out.meals||[]).map(x=>{const o={name:x.name||"Meal",desc:x.desc||""};NUT.forEach(k=>o[k]=Math.max(0,Math.round(Number(x[k])||0)));return o;}); out.lookups=lookups; return out;
+  }
+  throw new Error("Too many lookups without an answer");
+}
+async function lookupProduct(query,country){
+  const host=country&&/^[a-z]{2}$/i.test(country)?country.toLowerCase()+".openfoodfacts.org":"world.openfoodfacts.org";
+  const u=`https://${host}/cgi/search.pl?search_terms=${encodeURIComponent(query)}&search_simple=1&action=process&json=1&page_size=6&fields=product_name,brands,quantity,serving_size,nutriments,countries_tags`;
+  const r=await fetch(u,{headers:{accept:"application/json"}}); if(!r.ok)throw new Error("Open Food Facts "+r.status);
+  const j=await r.json(); const n=(p,k)=>{const v=p.nutriments?.[k];return v==null?null:Math.round(Number(v)*10)/10;};
+  return {count:j.count,products:(j.products||[]).map(p=>({name:p.product_name,brand:p.brands,pack:p.quantity,serving_size:p.serving_size,per_100g:{kcal:n(p,"energy-kcal_100g"),protein:n(p,"proteins_100g"),carbs:n(p,"carbohydrates_100g"),fat:n(p,"fat_100g"),satfat:n(p,"saturated-fat_100g"),fibre:n(p,"fiber_100g"),sugar:n(p,"sugars_100g"),salt:n(p,"salt_100g"),sodium:n(p,"sodium_100g")},per_serving_kcal:n(p,"energy-kcal_serving"),countries:(p.countries_tags||[]).slice(0,3)}))};
 }
 function renderPreview(){
   const p=pending, tot={};NUT.forEach(k=>tot[k]=p.meals.reduce((a,m)=>a+(m[k]||0),0));
   $("#preview").innerHTML=`<div class="tot"><div><span class="k num">${fmt(tot.kcal)}</span> <span class="muted">kcal</span></div><div class="muted small num">P ${fmt(tot.protein)} · C ${fmt(tot.carbs)} · F ${fmt(tot.fat)} · fibre ${fmt(tot.fibre)} g</div></div>
   <div class="edit-grid"><div class="h">Meal</div><div class="h">kcal</div><div class="h">P</div><div class="h">C</div><div class="h">F</div>
   ${p.meals.map((m,i)=>`<input class="t" data-i="${i}" data-k="name" value="${esc(m.name)}" aria-label="Meal name"><input data-i="${i}" data-k="kcal" type="number" value="${m.kcal}"><input data-i="${i}" data-k="protein" type="number" value="${m.protein}"><input data-i="${i}" data-k="carbs" type="number" value="${m.carbs}"><input data-i="${i}" data-k="fat" type="number" value="${m.fat}"><div class="hint" style="grid-column:1/-1;margin:-2px 0 6px">${esc(m.desc)}</div>`).join("")}</div>
-  ${p.assumption?`<p class="hint">Assumed: ${esc(p.assumption)}</p>`:""}${p.note?`<p class="hint" style="font-style:italic">${esc(p.note)}</p>`:""}`;
+  ${p.lookups?`<p class="hint">${p.lookups} product label${p.lookups>1?"s":""} looked up on Open Food Facts.</p>`:""}${p.assumption?`<p class="hint">Assumed: ${esc(p.assumption)}</p>`:""}${p.note?`<p class="hint" style="font-style:italic">${esc(p.note)}</p>`:""}`;
   $("#preview").querySelectorAll("input").forEach(inp=>inp.addEventListener("change",()=>{const m=p.meals[+inp.dataset.i];const k=inp.dataset.k;m[k]=k==="name"?inp.value:Math.max(0,Math.round(Number(inp.value)||0));if(k!=="name"){/* keep kcal roughly consistent when a macro changes */ if(k!=="kcal")m.kcal=Math.round(m.protein*4+m.carbs*4+m.fat*9);}renderPreview();}));
 }
 $("#discardBtn").addEventListener("click",()=>{pending=null;$("#previewPanel").hidden=true;});
