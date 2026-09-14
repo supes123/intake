@@ -188,6 +188,17 @@ details.help p{font-size:14px}
     <div class="panel" id="previewPanel" hidden>
       <div class="panel-h"><h2>Check the estimate</h2><span class="muted small">edit any number</span></div>
       <div class="preview" id="preview"></div>
+      <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line)">
+        <div class="eyebrow" style="margin-bottom:8px">Amend by voice</div>
+        <div class="logbar" style="grid-template-columns:52px 1fr">
+          <button class="mic" id="amendMic" type="button" aria-label="Dictate an amendment" style="width:52px;height:52px">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+          </button>
+          <textarea id="amendText" style="min-height:56px" placeholder="e.g. the chocolate was the whole 90 g bar, and drop the coffee"></textarea>
+        </div>
+        <button class="btn" id="amendBtn" type="button" style="margin-top:8px">Apply amendment</button>
+        <div id="amendNotice" style="margin-top:8px" hidden></div>
+      </div>
       <div class="row" style="margin-top:12px">
         <button class="btn" id="discardBtn" type="button">Discard</button>
         <button class="btn primary" id="saveBtn" type="button">Add to the day</button>
@@ -384,7 +395,7 @@ if(!SR){$("#micBtn").hidden=true;$("#micHint").textContent="Use the keyboard's d
 /* Android Chrome repeats results in continuous mode, so run short non-continuous sessions and
    restart them ourselves while the mic is on. Final text is committed once per session; only the
    latest interim guess is shown alongside it. */
-let wantOn=false, committed="";
+let wantOn=false, committed="", recTarget=null, recBtn=null;
 function startRec(){
   rec=new SR();rec.lang="en-GB";rec.continuous=false;rec.interimResults=true;rec.maxAlternatives=1;
   let interim="", finalThis="";
@@ -394,18 +405,20 @@ function startRec(){
       const tail=committed.slice(-finalThis.length-1).trim().toLowerCase();
       if(tail!==finalThis.toLowerCase())committed+=(committed?" ":"")+finalThis;
       finalThis="";interim="";}
-    $("#logText").value=[baseText,committed,interim].filter(Boolean).join(" ");};
+    recTarget.value=[baseText,committed,interim].filter(Boolean).join(" ");};
   rec.onend=()=>{if(wantOn){setTimeout(()=>{if(wantOn)try{rec.start();}catch{stopRec();}},150);}else stopRec();};
   rec.onerror=ev=>{if(ev.error==="no-speech"||ev.error==="aborted")return; // onend will restart
     wantOn=false;stopRec();if(ev.error==="not-allowed")notice("#logNotice","Microphone access was blocked. Allow it for this site in Chrome's site settings, or use the keyboard's mic key.",true);
     else notice("#logNotice","Dictation stopped ("+ev.error+"). Use the keyboard's mic key instead.",true);};
-  try{rec.start();recOn=true;$("#micBtn").classList.add("on");}catch{stopRec();}
+  try{rec.start();recOn=true;recBtn.classList.add("on");}catch{stopRec();}
 }
-function stopRec(){recOn=false;wantOn=false;$("#micBtn").classList.remove("on");try{rec&&rec.stop();}catch{}}
-$("#micBtn").addEventListener("click",()=>{
-  if(recOn){wantOn=false;stopRec();return;}
-  baseText=$("#logText").value.trim();committed="";wantOn=true;notice("#logNotice","");startRec();});
-$("#logText").addEventListener("input",()=>{if(recOn){/* user edited while dictating: adopt their text as the base */baseText=$("#logText").value.trim();committed="";}});
+function stopRec(){recOn=false;wantOn=false;$$(".mic").forEach(b=>b.classList.remove("on"));try{rec&&rec.stop();}catch{}}
+function micToggle(btn,ta,noticeSel){
+  if(recOn){const same=recBtn===btn;stopRec();if(same)return;}
+  recBtn=btn;recTarget=ta;baseText=ta.value.trim();committed="";wantOn=true;notice(noticeSel,"");startRec();}
+$("#micBtn").addEventListener("click",()=>micToggle($("#micBtn"),$("#logText"),"#logNotice"));
+$("#amendMic").addEventListener("click",()=>micToggle($("#amendMic"),$("#amendText"),"#amendNotice"));
+[$("#logText"),$("#amendText")].forEach(ta=>ta.addEventListener("input",()=>{if(recOn&&recTarget===ta){baseText=ta.value.trim();committed="";}}));
 
 function fillLogDates(){const sel=$("#logDate"),cur=sel.value;sel.innerHTML="";for(let i=0;i<7;i++){const d=new Date();d.setDate(d.getDate()-i);const k=iso(d);const o=document.createElement("option");o.value=k;o.textContent=i===0?"Today":i===1?"Yesterday":nice(k);sel.appendChild(o);}if(cur)sel.value=cur;}
 function notice(sel,msg,err){const n=$(sel);n.hidden=!msg;n.className="notice"+(err?" err":"");n.textContent=msg||"";}
@@ -420,7 +433,7 @@ $("#estimateBtn").addEventListener("click",async()=>{
   catch(e){notice("#logNotice","Estimate failed: "+(e.message||e),true);}
   finally{btn.disabled=false;btn.textContent="Estimate with Claude";}
 });
-async function estimate(text){
+async function estimate(text,prior){
   const sys=`You estimate nutrition from a spoken description of what someone ate. The description was dictated, so expect run-on text and mis-heard food names; interpret charitably (e.g. "koala" dressing is a mis-hearing of a brand). 
 
 BRANDED PRODUCTS: whenever an item is a named commercial product (a brand, a supermarket own-label, a specific bar, drink, cereal, ready meal, sauce or dressing), call the lookup_product tool to get its label values from Open Food Facts instead of estimating. Search with the brand and product name as printed on the pack, without quantities ("Green & Black's dark 70%", "Hellmann's real mayonnaise", "Tnuva cottage cheese 5%"). Pick the result that best matches; if the first search misses, try once more with different wording, then fall back to your own estimate. Scale the per-100g label values to the quantity eaten (use serving_size or the pack quantity when the person says "a bar", "a pot", "a can"). Sodium: use sodium_100g (grams) x 1000, or salt_100g x 400. In desc, say which product record you used, e.g. "(label: Green & Black's Dark 70%, 45 g)". For unbranded or home-cooked food, estimate from McCance & Widdowson / USDA values and typical UK and Israeli home and restaurant portions. Portions: when vague, assume a normal adult portion, leaning slightly generous. Alcohol counts at 7 kcal/g inside the meal's kcal. Keep kcal consistent with macros (4/4/9).
@@ -429,7 +442,7 @@ FINAL ANSWER: when done looking things up, return ONLY JSON, no prose, in this e
 {"meals":[{"name":"Breakfast|Lunch|Dinner|Snack|Drinks","desc":"the items, tidied, with the portion you assumed and any label source","kcal":0,"protein":0,"carbs":0,"fat":0,"satfat":0,"fibre":0,"sugar":0,"sodium":0}],"note":"one short plain observation or empty string","assumption":"the single most consequential assumption you made, or empty string"}
 Grams for protein/carbs/fat/satfat/fibre/sugar, milligrams for sodium, integers throughout. Only include meals the person mentioned.`;
   const tools=[{name:"lookup_product",description:"Search the Open Food Facts database for a packaged product's label nutrition (per 100 g and serving size). Returns up to 6 matching products.",input_schema:{type:"object",properties:{query:{type:"string",description:"Brand and product name as printed on the pack, no quantities"},country:{type:"string",description:"Optional 2-letter country hint: gb, il, us"}},required:["query"]}}];
-  const messages=[{role:"user",content:text}]; let lookups=0;
+  const messages=prior?[...prior,{role:"user",content:"AMENDMENT to the estimate above: "+text+"\n\nApply this amendment and return the complete revised JSON for the whole day (all meals, not just the changed one). Keep every meal the amendment does not mention exactly as it was. Re-scale label values or re-estimate as needed. Use lookup_product again only if a product is newly named."}]:[{role:"user",content:text}]; let lookups=0;
   for(let round=0;round<6;round++){
     const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"content-type":"application/json","x-api-key":cfg.apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:cfg.apiModel||"claude-sonnet-4-5",max_tokens:2000,system:sys,tools,messages})});
     if(!r.ok){let m="";try{m=(await r.json()).error?.message||"";}catch{}throw new Error(r.status+" "+m);}
@@ -444,7 +457,7 @@ Grams for protein/carbs/fat/satfat/fibre/sugar, milligrams for sodium, integers 
     }
     const raw=(j.content||[]).map(c=>c.text||"").join("");
     const m=raw.match(/\{[\s\S]*\}/); if(!m)throw new Error("No JSON in the reply");
-    const out=JSON.parse(m[0]); out.meals=(out.meals||[]).map(x=>{const o={name:x.name||"Meal",desc:x.desc||""};NUT.forEach(k=>o[k]=Math.max(0,Math.round(Number(x[k])||0)));return o;}); out.lookups=lookups; return out;
+    const out=JSON.parse(m[0]); out.meals=(out.meals||[]).map(x=>{const o={name:x.name||"Meal",desc:x.desc||""};NUT.forEach(k=>o[k]=Math.max(0,Math.round(Number(x[k])||0)));return o;}); out.lookups=lookups; out.convo=[...messages,{role:"assistant",content:m[0]}]; return out;
   }
   throw new Error("Too many lookups without an answer");
 }
@@ -463,12 +476,25 @@ function renderPreview(){
   ${p.lookups?`<p class="hint">${p.lookups} product label${p.lookups>1?"s":""} looked up on Open Food Facts.</p>`:""}${p.assumption?`<p class="hint">Assumed: ${esc(p.assumption)}</p>`:""}${p.note?`<p class="hint" style="font-style:italic">${esc(p.note)}</p>`:""}`;
   $("#preview").querySelectorAll("input").forEach(inp=>inp.addEventListener("change",()=>{const m=p.meals[+inp.dataset.i];const k=inp.dataset.k;m[k]=k==="name"?inp.value:Math.max(0,Math.round(Number(inp.value)||0));if(k!=="name"){/* keep kcal roughly consistent when a macro changes */ if(k!=="kcal")m.kcal=Math.round(m.protein*4+m.carbs*4+m.fat*9);}renderPreview();}));
 }
-$("#discardBtn").addEventListener("click",()=>{pending=null;$("#previewPanel").hidden=true;});
+$("#amendBtn").addEventListener("click",async()=>{
+  const text=$("#amendText").value.trim(); if(!pending)return; if(!text)return notice("#amendNotice","Say or type what to change first.",true);
+  if(recOn)stopRec();
+  const btn=$("#amendBtn");btn.disabled=true;btn.textContent="Revising…";notice("#amendNotice","");
+  try{
+    // include any manual edits made in the grid so the revision starts from what is on screen
+    const current={meals:pending.meals,note:pending.note||"",assumption:pending.assumption||""};
+    const convo=[...(pending.convo||[]).slice(0,-1),{role:"assistant",content:JSON.stringify(current)}];
+    const revised=await estimate(text,convo); revised.date=pending.date; revised.lookups=(pending.lookups||0)+(revised.lookups||0);
+    pending=revised; $("#amendText").value=""; renderPreview(); notice("#amendNotice","Revised. Check the numbers again.");
+  }catch(e){notice("#amendNotice","Amendment failed: "+(e.message||e),true);}
+  finally{btn.disabled=false;btn.textContent="Apply amendment";}
+});
+$("#discardBtn").addEventListener("click",()=>{pending=null;$("#amendText").value="";notice("#amendNotice","");$("#previewPanel").hidden=true;});
 $("#saveBtn").addEventListener("click",()=>{
   if(!pending)return; const d=ensureDay(pending.date), now=new Date().toISOString();
   pending.meals.forEach(m=>d.meals.push({...m,id:uid(),loggedAt:now,source:"app"}));
   if(pending.note){d.notes=pending.note;d.notesAt=now;}
-  pending=null;$("#previewPanel").hidden=true;$("#logText").value="";dirtyThenSync();showView("today");
+  pending=null;$("#amendText").value="";notice("#amendNotice","");$("#previewPanel").hidden=true;$("#logText").value="";dirtyThenSync();showView("today");
 });
 
 /* ============ settings ============ */
