@@ -61,7 +61,7 @@ header.top{display:flex;justify-content:space-between;align-items:flex-end;gap:1
 .ring .big{font-size:28px;font-weight:600;line-height:1;font-family:"Newsreader",serif}
 .ring .of{font-size:12px;color:var(--muted);margin-top:4px}
 .macros{display:grid;gap:9px}
-.m{display:grid;grid-template-columns:60px 1fr 104px;gap:10px;align-items:center;font-size:14px}
+.m{display:grid;grid-template-columns:56px 1fr 112px;gap:10px;align-items:center;font-size:14px}
 .m .lab{font-weight:500}
 .bar{height:8px;background:var(--line);border-radius:4px;overflow:hidden}
 .bar i{display:block;height:100%;border-radius:4px;background:var(--c,var(--accent));transition:width .4s ease}
@@ -69,11 +69,15 @@ header.top{display:flex;justify-content:space-between;align-items:flex-end;gap:1
 .m .val b{color:var(--ink);font-weight:600}
 /* meals */
 .meals{margin:0;padding:0;list-style:none;display:grid;gap:8px}
-.meals li{display:grid;grid-template-columns:1fr auto;gap:10px;padding:10px 12px;background:var(--bg);border-radius:10px;align-items:start}
+.meals li{display:block;padding:10px 12px;background:var(--bg);border-radius:10px}
+.meals .mh{display:flex;justify-content:space-between;gap:10px;align-items:start}
 .meals .n{font-weight:500}
 .meals .desc{color:var(--muted);font-size:13px}
 .meals .r{text-align:right;color:var(--muted);font-size:12px;white-space:nowrap}
 .meals .r b{color:var(--ink);font-size:15px}
+.items{list-style:none;margin:6px 0 2px;padding:0 0 0 8px;border-left:2px solid var(--line);display:grid;gap:2px;font-size:12px}
+.items li{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.items .tag{font-size:9px;letter-spacing:.05em;text-transform:uppercase;font-weight:700;color:var(--accent);background:var(--accent-soft);padding:0 4px;border-radius:3px;vertical-align:1px}
 .meals .x{font-size:12px;color:var(--over);background:none;border:0;padding:2px 0;cursor:pointer;font-family:inherit}
 /* buttons/forms */
 button{font:inherit}
@@ -100,11 +104,15 @@ label.f span b{color:var(--ink);font-weight:500}
 .preview{display:grid;gap:10px}
 .preview .tot{display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap}
 .preview .tot .k{font-family:"Newsreader",serif;font-size:26px;font-weight:600}
-.edit-grid{display:grid;grid-template-columns:1fr 60px 52px 52px 52px;gap:6px;align-items:center;font-size:13px}
-.edit-grid input{padding:6px 8px;min-height:0;font-size:13px;text-align:right}
+.edit-grid{display:grid;grid-template-columns:1fr 54px 46px 46px 46px;gap:5px;align-items:center;font-size:13px}
+.edit-grid input{padding:6px 5px;min-height:0;font-size:13px;text-align:right}
 .edit-grid input.t{text-align:left}
 .edit-grid .h{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.05em;text-align:right}
 .edit-grid .h:first-child{text-align:left}
+.edit-grid .mealname{font-weight:600;background:transparent;border-color:transparent;padding-left:0}
+.edit-grid .item-name{padding-left:10px;border-left:2px solid var(--line)}
+.edit-grid .item-name .hint{font-size:11px;line-height:1.3}
+.edit-grid b{font-size:13px}
 /* chart */
 .chart svg{width:100%;height:auto;display:block}
 .legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin-top:8px}
@@ -337,7 +345,8 @@ function renderToday(){
   const ul=$("#todayMeals"); ul.innerHTML=d?mealsHtml(d,true):""; $("#todayEmpty").hidden=!!(d&&d.meals.length);
   const w=Object.keys(S.weights).sort().pop(); $("#lastWeight").textContent=w?`${S.weights[w]} kg on ${nice(w)}`:"";
 }
-function mealsHtml(d,del){return (d.meals||[]).map(m=>`<li><div><div class="n">${esc(m.name||"Meal")}</div><div class="desc">${esc(m.desc||"")}</div>${del?`<button class="x" data-del="${d.date}|${m.id}" type="button">Remove</button>`:""}</div><div class="r num"><b>${fmt(m.kcal)}</b> kcal<br>P ${fmt(m.protein)} · C ${fmt(m.carbs)} · F ${fmt(m.fat)}</div></li>`).join("");}
+function mealsHtml(d,del){return (d.meals||[]).map(m=>{const items=(m.items||[]);const rows=items.length?`<ul class="items">${items.map(it=>`<li><span>${esc(it.name)}${it.qty?` <span class="muted">${esc(it.qty)}</span>`:""}${it.source&&/label/i.test(it.source)?` <span class="tag">label</span>`:""}</span><span class="num muted">${fmt(it.kcal)} · P ${fmt(it.protein)} · C ${fmt(it.carbs)} · F ${fmt(it.fat)}</span></li>`).join("")}</ul>`:`<div class="desc">${esc(m.desc||"")}</div>`;
+  return `<li><div class="mh"><div class="n">${esc(m.name||"Meal")}</div><div class="r num"><b>${fmt(m.kcal)}</b> kcal<br>P ${fmt(m.protein)} · C ${fmt(m.carbs)} · F ${fmt(m.fat)}</div></div>${rows}${del?`<button class="x" data-del="${d.date}|${m.id}" type="button">Remove</button>`:""}</li>`;}).join("");}
 function renderHistory(){
   const T=S.targets, list=Object.values(S.days).filter(d=>d.meals&&d.meals.length).sort((a,b)=>a.date<b.date?1:-1);
   // chart
@@ -439,8 +448,8 @@ async function estimate(text,prior){
 BRANDED PRODUCTS: whenever an item is a named commercial product (a brand, a supermarket own-label, a specific bar, drink, cereal, ready meal, sauce or dressing), call the lookup_product tool to get its label values from Open Food Facts instead of estimating. Search with the brand and product name as printed on the pack, without quantities ("Green & Black's dark 70%", "Hellmann's real mayonnaise", "Tnuva cottage cheese 5%"). Pick the result that best matches; if the first search misses, try once more with different wording, then fall back to your own estimate. Scale the per-100g label values to the quantity eaten (use serving_size or the pack quantity when the person says "a bar", "a pot", "a can"). Sodium: use sodium_100g (grams) x 1000, or salt_100g x 400. In desc, say which product record you used, e.g. "(label: Green & Black's Dark 70%, 45 g)". For unbranded or home-cooked food, estimate from McCance & Widdowson / USDA values and typical UK and Israeli home and restaurant portions. Portions: when vague, assume a normal adult portion, leaning slightly generous. Alcohol counts at 7 kcal/g inside the meal's kcal. Keep kcal consistent with macros (4/4/9).
 
 FINAL ANSWER: when done looking things up, return ONLY JSON, no prose, in this exact shape:
-{"meals":[{"name":"Breakfast|Lunch|Dinner|Snack|Drinks","desc":"the items, tidied, with the portion you assumed and any label source","kcal":0,"protein":0,"carbs":0,"fat":0,"satfat":0,"fibre":0,"sugar":0,"sodium":0}],"note":"one short plain observation or empty string","assumption":"the single most consequential assumption you made, or empty string"}
-Grams for protein/carbs/fat/satfat/fibre/sugar, milligrams for sodium, integers throughout. Only include meals the person mentioned.`;
+{"meals":[{"name":"Breakfast|Lunch|Dinner|Snack|Drinks","items":[{"name":"the food, short (e.g. Salt beef)","qty":"the portion you assumed (e.g. 5 slices, ~150 g)","source":"label: <product record> | estimate","kcal":0,"protein":0,"carbs":0,"fat":0,"satfat":0,"fibre":0,"sugar":0,"sodium":0}]}],"note":"one short plain observation or empty string","assumption":"the single most consequential assumption you made, or empty string"}
+One item per distinct food or drink (a salad with dressing is two items: the salad and the dressing). Meal totals are computed from the items — do not include them. Grams for protein/carbs/fat/satfat/fibre/sugar, milligrams for sodium, integers throughout. Only include meals the person mentioned.`;
   const tools=[{name:"lookup_product",description:"Search the Open Food Facts database for a packaged product's label nutrition (per 100 g and serving size). Returns up to 6 matching products.",input_schema:{type:"object",properties:{query:{type:"string",description:"Brand and product name as printed on the pack, no quantities"},country:{type:"string",description:"Optional 2-letter country hint: gb, il, us"}},required:["query"]}}];
   const messages=prior?[...prior,{role:"user",content:"AMENDMENT to the estimate above: "+text+"\n\nApply this amendment and return the complete revised JSON for the whole day (all meals, not just the changed one). Keep every meal the amendment does not mention exactly as it was. Re-scale label values or re-estimate as needed. Use lookup_product again only if a product is newly named."}]:[{role:"user",content:text}]; let lookups=0;
   for(let round=0;round<6;round++){
@@ -457,10 +466,17 @@ Grams for protein/carbs/fat/satfat/fibre/sugar, milligrams for sodium, integers 
     }
     const raw=(j.content||[]).map(c=>c.text||"").join("");
     const m=raw.match(/\{[\s\S]*\}/); if(!m)throw new Error("No JSON in the reply");
-    const out=JSON.parse(m[0]); out.meals=(out.meals||[]).map(x=>{const o={name:x.name||"Meal",desc:x.desc||""};NUT.forEach(k=>o[k]=Math.max(0,Math.round(Number(x[k])||0)));return o;}); out.lookups=lookups; out.convo=[...messages,{role:"assistant",content:m[0]}]; return out;
+    const out=JSON.parse(m[0]); out.meals=(out.meals||[]).map(x=>normMeal(x)); out.lookups=lookups; out.convo=[...messages,{role:"assistant",content:m[0]}]; return out;
   }
   throw new Error("Too many lookups without an answer");
 }
+function normMeal(x){
+  const o={name:x.name||"Meal",items:[]};
+  const items=Array.isArray(x.items)&&x.items.length?x.items:[{name:x.desc||x.name||"Item",qty:"",source:"",...x}];
+  o.items=items.map(it=>{const r={name:String(it.name||"Item"),qty:String(it.qty||""),source:String(it.source||"")};NUT.forEach(k=>r[k]=Math.max(0,Math.round(Number(it[k])||0)));return r;});
+  rollup(o); return o;
+}
+function rollup(m){NUT.forEach(k=>m[k]=(m.items||[]).reduce((a,it)=>a+(Number(it[k])||0),0));m.desc=(m.items||[]).map(it=>it.name+(it.qty?" ("+it.qty+")":"")).join("; ");return m;}
 async function lookupProduct(query,country){
   const host=country&&/^[a-z]{2}$/i.test(country)?country.toLowerCase()+".openfoodfacts.org":"world.openfoodfacts.org";
   const u=`https://${host}/cgi/search.pl?search_terms=${encodeURIComponent(query)}&search_simple=1&action=process&json=1&page_size=6&fields=product_name,brands,quantity,serving_size,nutriments,countries_tags`;
@@ -469,12 +485,18 @@ async function lookupProduct(query,country){
   return {count:j.count,products:(j.products||[]).map(p=>({name:p.product_name,brand:p.brands,pack:p.quantity,serving_size:p.serving_size,per_100g:{kcal:n(p,"energy-kcal_100g"),protein:n(p,"proteins_100g"),carbs:n(p,"carbohydrates_100g"),fat:n(p,"fat_100g"),satfat:n(p,"saturated-fat_100g"),fibre:n(p,"fiber_100g"),sugar:n(p,"sugars_100g"),salt:n(p,"salt_100g"),sodium:n(p,"sodium_100g")},per_serving_kcal:n(p,"energy-kcal_serving"),countries:(p.countries_tags||[]).slice(0,3)}))};
 }
 function renderPreview(){
-  const p=pending, tot={};NUT.forEach(k=>tot[k]=p.meals.reduce((a,m)=>a+(m[k]||0),0));
+  const p=pending; p.meals.forEach(m=>{if(m.items)rollup(m);}); const tot={};NUT.forEach(k=>tot[k]=p.meals.reduce((a,m)=>a+(m[k]||0),0));
   $("#preview").innerHTML=`<div class="tot"><div><span class="k num">${fmt(tot.kcal)}</span> <span class="muted">kcal</span></div><div class="muted small num">P ${fmt(tot.protein)} · C ${fmt(tot.carbs)} · F ${fmt(tot.fat)} · fibre ${fmt(tot.fibre)} g</div></div>
-  <div class="edit-grid"><div class="h">Meal</div><div class="h">kcal</div><div class="h">P</div><div class="h">C</div><div class="h">F</div>
-  ${p.meals.map((m,i)=>`<input class="t" data-i="${i}" data-k="name" value="${esc(m.name)}" aria-label="Meal name"><input data-i="${i}" data-k="kcal" type="number" value="${m.kcal}"><input data-i="${i}" data-k="protein" type="number" value="${m.protein}"><input data-i="${i}" data-k="carbs" type="number" value="${m.carbs}"><input data-i="${i}" data-k="fat" type="number" value="${m.fat}"><div class="hint" style="grid-column:1/-1;margin:-2px 0 6px">${esc(m.desc)}</div>`).join("")}</div>
+  <div class="edit-grid"><div class="h">Item</div><div class="h">kcal</div><div class="h">P</div><div class="h">C</div><div class="h">F</div>
+  ${p.meals.map((m,i)=>`<input class="t mealname" data-i="${i}" data-k="name" value="${esc(m.name)}" aria-label="Meal name"><b class="num" style="text-align:right">${fmt(m.kcal)}</b><b class="num" style="text-align:right">${fmt(m.protein)}</b><b class="num" style="text-align:right">${fmt(m.carbs)}</b><b class="num" style="text-align:right">${fmt(m.fat)}</b>
+    ${(m.items||[]).map((it,j)=>`<div class="item-name"><input class="t" data-i="${i}" data-j="${j}" data-k="name" value="${esc(it.name)}" aria-label="Item"><div class="hint">${esc(it.qty)}${it.source?` · ${esc(it.source)}`:""}</div></div><input data-i="${i}" data-j="${j}" data-k="kcal" type="number" value="${it.kcal}"><input data-i="${i}" data-j="${j}" data-k="protein" type="number" value="${it.protein}"><input data-i="${i}" data-j="${j}" data-k="carbs" type="number" value="${it.carbs}"><input data-i="${i}" data-j="${j}" data-k="fat" type="number" value="${it.fat}">`).join("")}
+    <div style="grid-column:1/-1;height:6px"></div>`).join("")}</div>
   ${p.lookups?`<p class="hint">${p.lookups} product label${p.lookups>1?"s":""} looked up on Open Food Facts.</p>`:""}${p.assumption?`<p class="hint">Assumed: ${esc(p.assumption)}</p>`:""}${p.note?`<p class="hint" style="font-style:italic">${esc(p.note)}</p>`:""}`;
-  $("#preview").querySelectorAll("input").forEach(inp=>inp.addEventListener("change",()=>{const m=p.meals[+inp.dataset.i];const k=inp.dataset.k;m[k]=k==="name"?inp.value:Math.max(0,Math.round(Number(inp.value)||0));if(k!=="name"){/* keep kcal roughly consistent when a macro changes */ if(k!=="kcal")m.kcal=Math.round(m.protein*4+m.carbs*4+m.fat*9);}renderPreview();}));
+  $("#preview").querySelectorAll("input").forEach(inp=>inp.addEventListener("change",()=>{const m=p.meals[+inp.dataset.i];const k=inp.dataset.k;
+    if(inp.dataset.j==null){m.name=inp.value;return;}
+    const it=m.items[+inp.dataset.j]; it[k]=k==="name"?inp.value:Math.max(0,Math.round(Number(inp.value)||0));
+    if(k!=="name"&&k!=="kcal")it.kcal=Math.round(it.protein*4+it.carbs*4+it.fat*9);
+    rollup(m);renderPreview();}));
 }
 $("#amendBtn").addEventListener("click",async()=>{
   const text=$("#amendText").value.trim(); if(!pending)return; if(!text)return notice("#amendNotice","Say or type what to change first.",true);
@@ -558,7 +580,7 @@ async function processInbox(state){
   for(const f of entries){if(done.has(f.name))continue;
     const r=await download(f.path_lower);if(!r)continue; let j=null;try{j=JSON.parse(r.text);}catch{}
     if(j){const items=Array.isArray(j)?j:(j.days||[j]);const inc={version:1,days:{},weights:{},processedInbox:[]};
-      items.forEach(it=>{if(!it||!it.date)return;const meals=(it.meals||[]).map((m,i)=>({id:m.id||(f.name.replace(/\.json$/i,"")+"-"+i),name:m.name||"Meal",desc:m.desc||"",...Object.fromEntries(NUT.map(k=>[k,Math.max(0,Math.round(Number(m[k])||0))])),loggedAt:m.loggedAt||it.loggedAt||f.client_modified||new Date().toISOString(),source:m.source||it.source||"check-in"}));
+      items.forEach(it=>{if(!it||!it.date)return;const meals=(it.meals||[]).map((m,i)=>({...(Array.isArray(m.items)&&m.items.length?normMeal(m):{name:m.name||"Meal",desc:m.desc||"",...Object.fromEntries(NUT.map(k=>[k,Math.max(0,Math.round(Number(m[k])||0))]))}),id:m.id||(f.name.replace(/\.json$/i,"")+"-"+i),loggedAt:m.loggedAt||it.loggedAt||f.client_modified||new Date().toISOString(),source:m.source||it.source||"check-in"}));
         inc.days[it.date]={date:it.date,meals,notes:it.notes||"",notesAt:it.notes?(it.loggedAt||f.client_modified):null};if(it.weightKg)inc.weights[it.date]=it.weightKg;});
       state=mergeState(state,inc);}
     state.processedInbox=[...(state.processedInbox||[]),f.name].slice(-500);
