@@ -367,10 +367,11 @@ async function maybeClaudeSummary(d,t,T,force){
     const w=Object.keys(S.weights).sort().slice(-4).map(k=>({date:k,kg:S.weights[k]}));
     const payload={date:d.date,dayComplete:d.date<today(),targets:T,totals:t,meals:d.meals.map(m=>({name:m.name,kcal:m.kcal,items:(m.items||[]).map(i=>({name:i.name,qty:i.qty,kcal:i.kcal,protein:i.protein,carbs:i.carbs,fat:i.fat,satfat:i.satfat,fibre:i.fibre,sugar:i.sugar,sodium:i.sodium}))})),previousDays:recent,recentWeights:w};
     const sys=`You are reviewing one day of a 52-year-old man's food log. He trains with weights three times a week, is aiming to lose about 0.5 kg a week, and wants direct, specific, useful feedback — no cheerleading, no lecturing, no generic nutrition advice. Name the actual items that drove each outcome, with their numbers. Where the previous days show a pattern (the same item recurring, protein consistently short, sodium high most days), say so — that is more valuable than the single day. If the day is still open ("dayComplete": false) speak about it as in progress and say what the rest of the day should do. Keep the sixth-form-biology tone out of it; write like a sharp friend who happens to know nutrition. British spelling. Return ONLY JSON: {"verdict":"one sentence, the single most important thing about this day","good":["0-3 short sentences on what worked, each naming items"],"bad":["0-3 short sentences on what did not, each naming items and numbers"],"next":"one concrete, specific suggestion for tomorrow or the rest of today, based on his actual habits shown here — or empty string"}`;
-    const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"content-type":"application/json","x-api-key":cfg.apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:cfg.apiModel||"claude-sonnet-5",max_tokens:700,system:sys,messages:[{role:"user",content:JSON.stringify(payload)}]})});
+    const stool=[{name:"write_summary",description:"Return the review of the day.",input_schema:{type:"object",properties:{verdict:{type:"string"},good:{type:"array",items:{type:"string"}},bad:{type:"array",items:{type:"string"}},next:{type:"string"}},required:["verdict","good","bad","next"]}}];
+    const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"content-type":"application/json","x-api-key":cfg.apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:cfg.apiModel||"claude-sonnet-5",max_tokens:1200,system:sys.replace("Return ONLY JSON:","Call write_summary with:"),tools:stool,tool_choice:{type:"tool",name:"write_summary"},messages:[{role:"user",content:JSON.stringify(payload)}]})});
     if(!r.ok)throw new Error(r.status);
-    const j=await r.json();const raw=(j.content||[]).map(c=>c.text||"").join("");const m=raw.match(/\{[\s\S]*\}/);if(!m)throw new Error("no json");
-    const sum=JSON.parse(m[0]); const day=S.days[d.date]; if(!day)return;
+    const j=await r.json();const use=(j.content||[]).find(c=>c.type==="tool_use");if(!use)throw new Error("no summary");
+    const sum=use.input||{}; const day=S.days[d.date]; if(!day)return;
     day.summary={verdict:String(sum.verdict||""),good:(sum.good||[]).map(String).slice(0,3),bad:(sum.bad||[]).map(String).slice(0,3),next:String(sum.next||"")}; day.summaryHash=dayHash(day,T); day.summaryAt=new Date().toISOString();
     persist(); if(viewDate===d.date){$("#daySummary").innerHTML=summaryHtml(day.summary);$("#summaryMeta").innerHTML=`Claude · <button class="btn ghost" id="summaryRefresh" type="button" style="font-size:13px;padding:0">refresh</button>`;}
     scheduleSync();
@@ -576,28 +577,30 @@ async function estimate(text,prior){
 
 BRANDED PRODUCTS: whenever an item is a named commercial product (a brand, a supermarket own-label, a specific bar, drink, cereal, ready meal, sauce or dressing), call the lookup_product tool to get its label values from Open Food Facts instead of estimating. Search with the brand and product name as printed on the pack, without quantities ("Green & Black's dark 70%", "Hellmann's real mayonnaise", "Tnuva cottage cheese 5%"). Pick the result that best matches; if the first search misses, try once more with different wording, then fall back to your own estimate. Scale the per-100g label values to the quantity eaten (use serving_size or the pack quantity when the person says "a bar", "a pot", "a can"). Sodium: use sodium_100g (grams) x 1000, or salt_100g x 400. In desc, say which product record you used, e.g. "(label: Green & Black's Dark 70%, 45 g)". For unbranded or home-cooked food, estimate from McCance & Widdowson / USDA values and typical UK and Israeli home and restaurant portions. Portions: when vague, assume a normal adult portion, leaning slightly generous. Alcohol counts at 7 kcal/g inside the meal's kcal. Keep kcal consistent with macros (4/4/9).
 
-FINAL ANSWER: when done looking things up, return ONLY JSON, no prose, in this exact shape:
-{"meals":[{"name":"Breakfast|Lunch|Dinner|Snack|Drinks","items":[{"name":"the food, short (e.g. Salt beef)","qty":"the portion you assumed (e.g. 5 slices, ~150 g)","source":"label: <product record> | estimate","kcal":0,"protein":0,"carbs":0,"fat":0,"satfat":0,"fibre":0,"sugar":0,"sodium":0}]}],"note":"one short plain observation or empty string","assumption":"the single most consequential assumption you made, or empty string"}
-One item per distinct food or drink (a salad with dressing is two items: the salad and the dressing). Meal totals are computed from the items — do not include them. Grams for protein/carbs/fat/satfat/fibre/sugar, milligrams for sodium, integers throughout. Only include meals the person mentioned.`;
+FINAL ANSWER: when done looking things up, call submit_estimate exactly once with the whole day. Never reply in prose and never ask a question — if something is ambiguous, make the most likely assumption and record it in "assumption". One item per distinct food or drink (a salad with dressing is two items). Do not include meal totals; the app sums the items. Grams for protein/carbs/fat/satfat/fibre/sugar, milligrams for sodium, integers throughout. Only include meals the person mentioned.`;
   const tools=[{name:"lookup_product",description:"Search the Open Food Facts database for a packaged product's label nutrition (per 100 g and serving size). Returns up to 6 matching products.",input_schema:{type:"object",properties:{query:{type:"string",description:"Brand and product name as printed on the pack, no quantities"},country:{type:"string",description:"Optional 2-letter country hint: gb, il, us"}},required:["query"]}}];
-  const messages=prior?[...prior,{role:"user",content:"AMENDMENT to the estimate above: "+text+"\n\nApply this amendment and return the complete revised JSON for the whole day (all meals, not just the changed one). Keep every meal the amendment does not mention exactly as it was. Re-scale label values or re-estimate as needed. Use lookup_product again only if a product is newly named."}]:[{role:"user",content:text}]; let lookups=0;
-  for(let round=0;round<6;round++){
-    const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"content-type":"application/json","x-api-key":cfg.apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:cfg.apiModel||"claude-sonnet-5",max_tokens:2000,system:sys,tools,messages})});
+  const messages=prior?[...prior,{role:"user",content:"AMENDMENT to the estimate above: "+text+"\n\nApply this amendment and call submit_estimate again with the complete revised day (all meals, not just the changed one). Keep every meal the amendment does not mention exactly as it was. Re-scale label values or re-estimate as needed. Use lookup_product again only if a product is newly named."}]:[{role:"user",content:text}]; let lookups=0;
+  const NUTP={type:"integer"};
+  const itemSchema={type:"object",properties:{name:{type:"string"},qty:{type:"string"},source:{type:"string"},kcal:NUTP,protein:NUTP,carbs:NUTP,fat:NUTP,satfat:NUTP,fibre:NUTP,sugar:NUTP,sodium:NUTP},required:["name","qty","source","kcal","protein","carbs","fat","satfat","fibre","sugar","sodium"]};
+  tools.push({name:"submit_estimate",description:"Submit the finished nutrition estimate for the whole day described. Call this exactly once, after any product lookups.",input_schema:{type:"object",properties:{meals:{type:"array",items:{type:"object",properties:{name:{type:"string",description:"Breakfast, Lunch, Dinner, Snack or Drinks"},items:{type:"array",items:itemSchema}},required:["name","items"]}},note:{type:"string"},assumption:{type:"string"}},required:["meals","note","assumption"]}});
+  for(let round=0;round<8;round++){
+    const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"content-type":"application/json","x-api-key":cfg.apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:cfg.apiModel||"claude-sonnet-5",max_tokens:6000,system:sys,tools,tool_choice:{type:"any"},messages})});
     if(!r.ok){let m="";try{m=(await r.json()).error?.message||"";}catch{}throw new Error(r.status+" "+m);}
     const j=await r.json();
-    if(j.stop_reason==="tool_use"){
-      messages.push({role:"assistant",content:j.content});
-      const results=[];
-      for(const c of j.content){if(c.type!=="tool_use")continue;lookups++;$("#estimateBtn").textContent="Looking up "+(c.input.query||"product")+"…";
-        let out;try{out=await lookupProduct(c.input.query,c.input.country);}catch(e){out={error:String(e.message||e)};}
-        results.push({type:"tool_result",tool_use_id:c.id,content:JSON.stringify(out)});}
-      messages.push({role:"user",content:results}); continue;
-    }
-    const raw=(j.content||[]).map(c=>c.text||"").join("");
-    const m=raw.match(/\{[\s\S]*\}/); if(!m)throw new Error("No JSON in the reply");
-    const out=JSON.parse(m[0]); out.meals=(out.meals||[]).map(x=>normMeal(x)); out.lookups=lookups; out.convo=[...messages,{role:"assistant",content:m[0]}]; return out;
+    if(j.stop_reason==="max_tokens")throw new Error("The reply was cut off — try logging the day in two halves.");
+    const uses=(j.content||[]).filter(c=>c.type==="tool_use");
+    const done=uses.find(c=>c.name==="submit_estimate");
+    if(done){const out=done.input||{};out.meals=(out.meals||[]).map(x=>normMeal(x));out.note=String(out.note||"");out.assumption=String(out.assumption||"");out.lookups=lookups;
+      out.convo=[...messages,{role:"assistant",content:JSON.stringify({meals:out.meals,note:out.note,assumption:out.assumption})}];return out;}
+    if(!uses.length){const txt=(j.content||[]).map(c=>c.text||"").join("").trim();throw new Error(txt?("Claude replied in words instead of numbers: "+txt.slice(0,160)):"No estimate returned");}
+    messages.push({role:"assistant",content:j.content});
+    const results=[];
+    for(const c of uses){lookups++;$("#estimateBtn").textContent="Looking up "+(c.input.query||"product")+"…";
+      let out;try{out=await lookupProduct(c.input.query,c.input.country);}catch(e){out={error:String(e.message||e)};}
+      results.push({type:"tool_result",tool_use_id:c.id,content:JSON.stringify(out)});}
+    messages.push({role:"user",content:results});
   }
-  throw new Error("Too many lookups without an answer");
+  throw new Error("Too many product lookups without a result — try again with fewer brand names.");
 }
 function normMeal(x){
   const o={name:x.name||"Meal",items:[]};
