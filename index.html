@@ -194,7 +194,7 @@ details.help p{font-size:14px}
       <div class="empty" id="todayEmpty" hidden>Nothing yet. Tap <b>Log</b>, describe what you ate, and the ledger does the rest.</div>
     </div>
     <div class="panel" id="summaryPanel" hidden>
-      <div class="panel-h"><h2>What drove the day</h2></div>
+      <div class="panel-h"><h2>What drove the day</h2><span class="muted small" id="summaryMeta"></span></div>
       <div id="daySummary" class="summary"></div>
     </div>
     <div class="panel">
@@ -346,7 +346,8 @@ function mergeState(a,b){
     const deleted=new Set([...(da.deleted||[]),...(db.deleted||[])]); deleted.forEach(id=>byId.delete(id));
     const meals=[...byId.values()].sort((x,y)=>(x.loggedAt||"")<(y.loggedAt||"")?-1:1);
     const notes=(da.notesAt||"")>=(db.notesAt||"")?(da.notes||""):(db.notes||"");
-    out.days[dt]={date:dt,meals,notes,notesAt:[da.notesAt,db.notesAt].filter(Boolean).sort().pop()||null,deleted:[...deleted].slice(-200)};
+    const sa=(da.summaryAt||"")>=(db.summaryAt||"")?da:db;
+    out.days[dt]={date:dt,meals,notes,notesAt:[da.notesAt,db.notesAt].filter(Boolean).sort().pop()||null,deleted:[...deleted].slice(-200),...(sa.summary?{summary:sa.summary,summaryHash:sa.summaryHash,summaryAt:sa.summaryAt}:{})};
   });
   return out;
 }
@@ -355,6 +356,28 @@ function mergeState(a,b){
 function render(){renderToday();renderHistory();renderSettings();$("#dateLine").textContent=nice(today())+" · "+new Date().getFullYear();}
 let viewDate=today();
 function shiftDay(n){const d=parse(viewDate);d.setDate(d.getDate()+n);const k=iso(d);if(k>today())return;viewDate=k;const v=$("#view-today");v.classList.remove("slide-l","slide-r");void v.offsetWidth;v.classList.add(n<0?"slide-r":"slide-l");renderToday();}
+/* ---- Claude day summary, cached per day-state ---- */
+function dayHash(d,T){const parts=[d.date,d.date<today()?"done":"open",JSON.stringify(T)];(d.meals||[]).forEach(m=>parts.push(m.name,m.kcal,m.protein,m.carbs,m.fat,m.satfat,m.fibre,m.sugar,m.sodium,(m.items||[]).map(i=>i.name+i.kcal).join("|")));let h=0;const str=parts.join("~");for(let i=0;i<str.length;i++)h=(h*31+str.charCodeAt(i))|0;return String(h);}
+let summaryInflight=null;
+function summaryHtml(sum){return `<p class="neutral"><b>${esc(sum.verdict||"")}</b></p>`+(sum.good||[]).map(x=>`<p class="good">${esc(x)}</p>`).join("")+(sum.bad||[]).map(x=>`<p class="bad">${esc(x)}</p>`).join("")+(sum.next?`<p class="neutral">${esc(sum.next)}</p>`:"");}
+async function maybeClaudeSummary(d,t,T,force){
+  if(!cfg.apiKey||!d||!d.meals.length)return; const key=d.date+":"+dayHash(d,T); if(summaryInflight===key&&!force)return; summaryInflight=key;
+  try{
+    const recent=[];for(let i=1;i<=6;i++){const dt=parse(d.date);dt.setDate(dt.getDate()-i);const k=iso(dt);const dd=S.days[k];if(dd&&dd.meals.length){const tt=dayTotals(dd);recent.push({date:k,kcal:tt.kcal,protein:tt.protein,fat:tt.fat,fibre:tt.fibre,sodium:tt.sodium,items:dd.meals.flatMap(m=>(m.items||[]).map(i=>i.name)).slice(0,12)});}}
+    const w=Object.keys(S.weights).sort().slice(-4).map(k=>({date:k,kg:S.weights[k]}));
+    const payload={date:d.date,dayComplete:d.date<today(),targets:T,totals:t,meals:d.meals.map(m=>({name:m.name,kcal:m.kcal,items:(m.items||[]).map(i=>({name:i.name,qty:i.qty,kcal:i.kcal,protein:i.protein,carbs:i.carbs,fat:i.fat,satfat:i.satfat,fibre:i.fibre,sugar:i.sugar,sodium:i.sodium}))})),previousDays:recent,recentWeights:w};
+    const sys=`You are reviewing one day of a 52-year-old man's food log. He trains with weights three times a week, is aiming to lose about 0.5 kg a week, and wants direct, specific, useful feedback — no cheerleading, no lecturing, no generic nutrition advice. Name the actual items that drove each outcome, with their numbers. Where the previous days show a pattern (the same item recurring, protein consistently short, sodium high most days), say so — that is more valuable than the single day. If the day is still open ("dayComplete": false) speak about it as in progress and say what the rest of the day should do. Keep the sixth-form-biology tone out of it; write like a sharp friend who happens to know nutrition. British spelling. Return ONLY JSON: {"verdict":"one sentence, the single most important thing about this day","good":["0-3 short sentences on what worked, each naming items"],"bad":["0-3 short sentences on what did not, each naming items and numbers"],"next":"one concrete, specific suggestion for tomorrow or the rest of today, based on his actual habits shown here — or empty string"}`;
+    const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"content-type":"application/json","x-api-key":cfg.apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:cfg.apiModel||"claude-sonnet-5",max_tokens:700,system:sys,messages:[{role:"user",content:JSON.stringify(payload)}]})});
+    if(!r.ok)throw new Error(r.status);
+    const j=await r.json();const raw=(j.content||[]).map(c=>c.text||"").join("");const m=raw.match(/\{[\s\S]*\}/);if(!m)throw new Error("no json");
+    const sum=JSON.parse(m[0]); const day=S.days[d.date]; if(!day)return;
+    day.summary={verdict:String(sum.verdict||""),good:(sum.good||[]).map(String).slice(0,3),bad:(sum.bad||[]).map(String).slice(0,3),next:String(sum.next||"")}; day.summaryHash=dayHash(day,T); day.summaryAt=new Date().toISOString();
+    persist(); if(viewDate===d.date){$("#daySummary").innerHTML=summaryHtml(day.summary);$("#summaryMeta").innerHTML=`Claude · <button class="btn ghost" id="summaryRefresh" type="button" style="font-size:13px;padding:0">refresh</button>`;}
+    scheduleSync();
+  }catch(e){console.warn("summary",e);if(viewDate===d.date)$("#summaryMeta").textContent="quick read";}
+  finally{if(summaryInflight===key)summaryInflight=null;}
+}
+document.addEventListener("click",e=>{if(e.target.id!=="summaryRefresh")return;const d=S.days[viewDate];if(!d)return;delete d.summary;delete d.summaryHash;$("#summaryMeta").textContent="asking Claude…";maybeClaudeSummary(d,dayTotals(d),S.targets,true);});
 function daySummary(d,t,T){
   if(!d||!d.meals.length||!t)return "";
   const isToday=d.date===today(), items=[]; d.meals.forEach(m=>(m.items&&m.items.length?m.items:[{name:m.desc||m.name,kcal:m.kcal,protein:m.protein,carbs:m.carbs,fat:m.fat,satfat:m.satfat||0,fibre:m.fibre||0,sugar:m.sugar||0,sodium:m.sodium||0}]).forEach(it=>items.push({...it,meal:m.name})));
@@ -411,7 +434,9 @@ function renderToday(){
   const rows=[["protein","Protein","g","var(--protein)",false],["carbs","Carbs","g","var(--carbs)",false],["fat","Fat","g","var(--fat)",false],["fibre","Fibre","g","var(--fibre)",false],["satfat","Sat fat","g","var(--faint)",true],["sugar","Sugar","g","var(--faint)",true],["sodium","Sodium","mg","var(--faint)",true]];
   $("#macros").innerHTML=rows.map(([key,lab,u,c,cap])=>{const v=t?t[key]:0,tg=T[key]||1,over=cap?v>tg:(key!=="fibre"&&v>tg*1.15);return `<div class="m"><span class="lab">${lab}</span><div class="bar"><i style="--c:${over?"var(--over)":c};width:${Math.min(100,v/tg*100).toFixed(0)}%"></i></div><span class="val num" title="${cap?"ceiling":"target"} ${fmt(tg)} ${u}"><b>${fmt(v)}</b> / ${fmt(tg)} ${u}</span></div>`;}).join("");
   const ul=$("#todayMeals"); ul.innerHTML=d?mealsHtml(d,true):""; $("#todayEmpty").hidden=!!(d&&d.meals.length);
-  const sm=daySummary(d,t,T); $("#summaryPanel").hidden=!sm; if(sm)$("#daySummary").innerHTML=sm;
+  const sm=daySummary(d,t,T); $("#summaryPanel").hidden=!sm;
+  if(sm){ if(d.summary&&d.summaryHash===dayHash(d,T)){$("#daySummary").innerHTML=summaryHtml(d.summary);$("#summaryMeta").innerHTML=`Claude · <button class="btn ghost" id="summaryRefresh" type="button" style="font-size:13px;padding:0">refresh</button>`;}
+    else {$("#daySummary").innerHTML=sm;$("#summaryMeta").textContent=cfg.apiKey?"asking Claude…":"quick read";maybeClaudeSummary(d,t,T);} }
   const wv=S.weights[viewDate]; const w=Object.keys(S.weights).filter(k=>k<=viewDate).sort().pop(); $("#lastWeight").textContent=wv?`${wv} kg`:(w?`last: ${S.weights[w]} kg on ${nice(w)}`:"");
 }
 function mealsHtml(d,del){
