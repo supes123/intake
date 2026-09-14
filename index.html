@@ -70,24 +70,32 @@ header.top{display:flex;justify-content:space-between;align-items:flex-end;gap:1
 .ring .big{font-size:30px;font-weight:700;line-height:1}
 .ring .of{font-size:12px;color:var(--muted);margin-top:4px}
 .macros{display:grid;gap:9px}
-.m{display:grid;grid-template-columns:60px 1fr 130px;gap:10px;align-items:center;font-size:15px}
+.m{display:grid;grid-template-columns:60px 1fr 124px;gap:10px;align-items:center;font-size:15px}
 .m .lab{font-weight:500}
 .bar{height:8px;background:var(--line);border-radius:4px;overflow:hidden}
 .bar i{display:block;height:100%;border-radius:4px;background:var(--c,var(--accent));transition:width .4s ease}
 .m .val{text-align:right;color:var(--muted);font-size:14px}
 .m .val b{color:var(--ink);font-weight:600}
+/* summary */
+.summary{display:grid;gap:10px;font-size:15px;line-height:1.5}
+.summary p{margin:0}
+.summary .good::before,.summary .bad::before,.summary .neutral::before{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:8px;vertical-align:2px}
+.summary .good::before{background:var(--accent)}.summary .bad::before{background:var(--over)}.summary .neutral::before{background:var(--faint)}
 /* meals */
-.meals{margin:0;padding:0;list-style:none;display:grid;gap:8px}
-.meals li{display:block;padding:10px 12px;background:var(--bg);border-radius:10px}
-.meals .mh{display:flex;justify-content:space-between;gap:10px;align-items:start}
-.meals .n{font-weight:500}
-.meals .desc{color:var(--muted);font-size:14px}
-.meals .r{text-align:right;color:var(--muted);font-size:13px;white-space:nowrap}
-.meals .r b{color:var(--ink);font-size:16px}
-.items{list-style:none;margin:6px 0 2px;padding:0 0 0 8px;border-left:2px solid var(--line);display:grid;gap:3px;font-size:13px}
-.items li{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}
-.items .tag{font-size:9px;letter-spacing:.05em;text-transform:uppercase;font-weight:700;color:var(--accent);background:var(--accent-soft);padding:0 4px;border-radius:3px;vertical-align:1px}
-.meals .x{font-size:12px;color:var(--over);background:none;border:0;padding:2px 0;cursor:pointer;font-family:inherit}
+.meals{display:block}
+.mt-head,.mt-row{display:grid;grid-template-columns:1fr 52px 40px 40px 40px;gap:6px;align-items:baseline}
+.mt-head{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:700;padding:0 10px 6px;border-bottom:1px solid var(--line)}
+.mt-head span:not(:first-child),.mt-row span.num{text-align:right}
+.mt-meal{margin-top:8px;background:var(--bg);border-radius:10px;padding:8px 10px}
+.mt-total{font-weight:700;font-size:16px;padding-bottom:6px;border-bottom:1px solid var(--line);margin-bottom:4px}
+.mt-total .num{font-size:16px}
+.mt-row:not(.mt-total){font-size:14px;padding:3px 0;color:var(--ink)}
+.mt-row:not(.mt-total) .num{color:var(--muted)}
+.mt-row:not(.mt-total) span.num:first-of-type{color:var(--ink);font-weight:600}
+.mt-name{min-width:0;overflow-wrap:anywhere}
+.mt-qty{display:block;font-size:12px;color:var(--muted);font-weight:400}
+.tag{display:inline-block;font-size:9px;letter-spacing:.05em;text-transform:uppercase;font-weight:700;color:var(--accent);background:var(--accent-soft);padding:0 4px;border-radius:3px;margin-left:6px;vertical-align:1px}
+.x{font-size:12px;font-weight:500;color:var(--over);background:none;border:0;padding:0 0 0 6px;cursor:pointer;font-family:inherit;vertical-align:1px}
 /* buttons/forms */
 button{font:inherit}
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:12px;padding:12px 16px;font-weight:500;cursor:pointer;min-height:46px}
@@ -182,8 +190,12 @@ details.help p{font-size:14px}
     </div>
     <div class="panel">
       <div class="panel-h"><h2>Meals</h2><button class="btn ghost" id="goLog" type="button">+ Log for this day</button></div>
-      <ul class="meals" id="todayMeals"></ul>
+      <div class="meals" id="todayMeals"></div>
       <div class="empty" id="todayEmpty" hidden>Nothing yet. Tap <b>Log</b>, describe what you ate, and the ledger does the rest.</div>
+    </div>
+    <div class="panel" id="summaryPanel" hidden>
+      <div class="panel-h"><h2>What drove the day</h2></div>
+      <div id="daySummary" class="summary"></div>
     </div>
     <div class="panel">
       <div class="panel-h"><h2>Weight</h2><span class="muted small" id="lastWeight"></span></div>
@@ -343,6 +355,45 @@ function mergeState(a,b){
 function render(){renderToday();renderHistory();renderSettings();$("#dateLine").textContent=nice(today())+" · "+new Date().getFullYear();}
 let viewDate=today();
 function shiftDay(n){const d=parse(viewDate);d.setDate(d.getDate()+n);const k=iso(d);if(k>today())return;viewDate=k;const v=$("#view-today");v.classList.remove("slide-l","slide-r");void v.offsetWidth;v.classList.add(n<0?"slide-r":"slide-l");renderToday();}
+function daySummary(d,t,T){
+  if(!d||!d.meals.length||!t)return "";
+  const isToday=d.date===today(), items=[]; d.meals.forEach(m=>(m.items&&m.items.length?m.items:[{name:m.desc||m.name,kcal:m.kcal,protein:m.protein,carbs:m.carbs,fat:m.fat,satfat:m.satfat||0,fibre:m.fibre||0,sugar:m.sugar||0,sodium:m.sodium||0}]).forEach(it=>items.push({...it,meal:m.name})));
+  const top=(k,n=2)=>[...items].filter(i=>(i[k]||0)>0).sort((a,b)=>(b[k]||0)-(a[k]||0)).slice(0,n);
+  const list=arr=>arr.map((x,i)=>x).join(i=>"");
+  const names=arr=>arr.map(i=>i.name.toLowerCase()).join(" and ");
+  const pct=(v,tg)=>Math.round(v/tg*100);
+  const good=[],bad=[],neutral=[];
+  // calories
+  const kd=t.kcal-T.kcal;
+  if(kd>150){const tk=top("kcal");bad.push(`Calories ran ${fmt(kd)} over the ${fmt(T.kcal)} target. ${tk.length?`The biggest share came from ${names(tk)} (${tk.map(i=>fmt(i.kcal)).join(" and ")} kcal).`:""}`);}
+  else if(kd<-500&&isToday)neutral.push(`${fmt(-kd)} kcal still in hand for the rest of the day.`);
+  else if(kd<-500)bad.push(`The day finished ${fmt(-kd)} kcal under target — a large deficit on its own is fine occasionally, but repeated it tends to lead to a rebound.`);
+  else good.push(`Calories landed within ${fmt(Math.abs(kd))} kcal of target.`);
+  // protein
+  if(t.protein>=T.protein)good.push(`Protein hit ${fmt(t.protein)} g — the target was met${top("protein",1).length?`, mostly from ${names(top("protein",1))}`:""}.`);
+  else if(!isToday||kd>-300){const tp=top("protein",1);bad.push(`Protein was ${fmt(T.protein-t.protein)} g short at ${fmt(t.protein)} g (${pct(t.protein,T.protein)}% of target)${tp.length?`; ${names(tp)} was the main source`:""}. Adding a protein-led item to a meal would fix this faster than cutting anything.`);}
+  else neutral.push(`Protein is at ${fmt(t.protein)} g of ${fmt(T.protein)} g so far — room to lead the next meal with it.`);
+  // fat
+  if(t.fat>T.fat*1.15){const tf=top("fat");bad.push(`Fat came to ${fmt(t.fat)} g against ${fmt(T.fat)} g, driven by ${names(tf)}. That is where the surplus calories were hiding.`);}
+  else if(t.fat<=T.fat&&!isToday)good.push(`Fat stayed within its ${fmt(T.fat)} g budget.`);
+  // sat fat / sodium / sugar (ceilings)
+  if(t.satfat>T.satfat*1.1)bad.push(`Saturated fat was ${fmt(t.satfat)} g (ceiling ${fmt(T.satfat)} g) — ${names(top("satfat"))} carried most of it.`);
+  if(t.sodium>T.sodium*1.15)bad.push(`Sodium reached ${fmt(t.sodium)} mg against a ${fmt(T.sodium)} mg ceiling; ${names(top("sodium"))} accounted for the bulk.`);
+  if(t.sugar>T.sugar*1.15)bad.push(`Sugar was ${fmt(t.sugar)} g, above the ${fmt(T.sugar)} g ceiling, mainly from ${names(top("sugar"))}.`);
+  // fibre
+  if(t.fibre>=T.fibre)good.push(`Fibre reached ${fmt(t.fibre)} g.`);
+  else if(!isToday)bad.push(`Fibre came in at ${fmt(t.fibre)} g of ${fmt(T.fibre)} g — vegetables, pulses or wholegrain bread at any meal would close that gap.`);
+  // carbs (only comment if strongly off)
+  if(t.carbs>T.carbs*1.25)bad.push(`Carbs were high at ${fmt(t.carbs)} g, largely ${names(top("carbs"))}.`);
+  // one-line verdict
+  let verdict;
+  if(bad.length===0)verdict="A day that fits the plan.";
+  else if(kd>150&&t.fat>T.fat*1.15)verdict="The pattern today: fat-heavy items pushed calories over while protein lagged — swapping one of them for a lean protein would fix both at once.";
+  else if(kd>150)verdict="Portion size rather than food choice drove the overshoot.";
+  else if(t.protein<T.protein*0.8)verdict="Calories were fine; the day's weakness was protein.";
+  else verdict="Broadly on plan, with one or two things to watch.";
+  return `<p class="neutral"><b>${verdict}</b></p>`+good.map(x=>`<p class="good">${x}</p>`).join("")+bad.map(x=>`<p class="bad">${x}</p>`).join("")+neutral.map(x=>`<p class="neutral">${x}</p>`).join("");
+}
 function renderToday(){
   if(viewDate>today())viewDate=today();
   const T=S.targets, d=S.days[viewDate], t=d?dayTotals(d):null, k=t?t.kcal:0;
@@ -358,12 +409,19 @@ function renderToday(){
   $("#ringArc").setAttribute("stroke-dasharray",(frac*C).toFixed(1)+" "+C.toFixed(1));
   $("#ringArc").setAttribute("stroke",k>T.kcal?"var(--over)":"var(--kcal)");
   const rows=[["protein","Protein","g","var(--protein)",false],["carbs","Carbs","g","var(--carbs)",false],["fat","Fat","g","var(--fat)",false],["fibre","Fibre","g","var(--fibre)",false],["satfat","Sat fat","g","var(--faint)",true],["sugar","Sugar","g","var(--faint)",true],["sodium","Sodium","mg","var(--faint)",true]];
-  $("#macros").innerHTML=rows.map(([key,lab,u,c,cap])=>{const v=t?t[key]:0,tg=T[key]||1,over=cap?v>tg:(key!=="fibre"&&v>tg*1.15);return `<div class="m"><span class="lab">${lab}</span><div class="bar"><i style="--c:${over?"var(--over)":c};width:${Math.min(100,v/tg*100).toFixed(0)}%"></i></div><span class="val num"><b>${fmt(v)}</b> / ${cap?"≤":""}${fmt(tg)} ${u}</span></div>`;}).join("");
+  $("#macros").innerHTML=rows.map(([key,lab,u,c,cap])=>{const v=t?t[key]:0,tg=T[key]||1,over=cap?v>tg:(key!=="fibre"&&v>tg*1.15);return `<div class="m"><span class="lab">${lab}</span><div class="bar"><i style="--c:${over?"var(--over)":c};width:${Math.min(100,v/tg*100).toFixed(0)}%"></i></div><span class="val num" title="${cap?"ceiling":"target"} ${fmt(tg)} ${u}"><b>${fmt(v)}</b> / ${fmt(tg)} ${u}</span></div>`;}).join("");
   const ul=$("#todayMeals"); ul.innerHTML=d?mealsHtml(d,true):""; $("#todayEmpty").hidden=!!(d&&d.meals.length);
+  const sm=daySummary(d,t,T); $("#summaryPanel").hidden=!sm; if(sm)$("#daySummary").innerHTML=sm;
   const wv=S.weights[viewDate]; const w=Object.keys(S.weights).filter(k=>k<=viewDate).sort().pop(); $("#lastWeight").textContent=wv?`${wv} kg`:(w?`last: ${S.weights[w]} kg on ${nice(w)}`:"");
 }
-function mealsHtml(d,del){return (d.meals||[]).map(m=>{const items=(m.items||[]);const rows=items.length?`<ul class="items">${items.map(it=>`<li><span>${esc(it.name)}${it.qty?` <span class="muted">${esc(it.qty)}</span>`:""}${it.source&&/label/i.test(it.source)?` <span class="tag">label</span>`:""}</span><span class="num muted">${fmt(it.kcal)} · P ${fmt(it.protein)} · C ${fmt(it.carbs)} · F ${fmt(it.fat)}</span></li>`).join("")}</ul>`:`<div class="desc">${esc(m.desc||"")}</div>`;
-  return `<li><div class="mh"><div class="n">${esc(m.name||"Meal")}</div><div class="r num"><b>${fmt(m.kcal)}</b> kcal<br>P ${fmt(m.protein)} · C ${fmt(m.carbs)} · F ${fmt(m.fat)}</div></div>${rows}${del?`<button class="x" data-del="${d.date}|${m.id}" type="button">Remove</button>`:""}</li>`;}).join("");}
+function mealsHtml(d,del){
+  const meals=d.meals||[]; if(!meals.length)return "";
+  const head=`<div class="mt-head"><span>Item</span><span>kcal</span><span>P</span><span>C</span><span>F</span></div>`;
+  return head+meals.map(m=>{const items=m.items||[];
+    const rows=items.length?items.map(it=>`<div class="mt-row"><span class="mt-name">${esc(it.name)}${it.source&&/label/i.test(it.source)?`<span class="tag" title="${esc(it.source)}">label</span>`:""}${it.qty?`<span class="mt-qty">${esc(it.qty)}</span>`:""}</span><span class="num">${fmt(it.kcal)}</span><span class="num">${fmt(it.protein)}</span><span class="num">${fmt(it.carbs)}</span><span class="num">${fmt(it.fat)}</span></div>`).join("")
+      :`<div class="mt-row"><span class="mt-name">${esc(m.desc||"")}</span><span></span><span></span><span></span><span></span></div>`;
+    return `<div class="mt-meal"><div class="mt-row mt-total"><span class="mt-name">${esc(m.name||"Meal")}${del?` <button class="x" data-del="${d.date}|${m.id}" type="button">Remove</button>`:""}</span><span class="num">${fmt(m.kcal)}</span><span class="num">${fmt(m.protein)}</span><span class="num">${fmt(m.carbs)}</span><span class="num">${fmt(m.fat)}</span></div>${rows}</div>`;}).join("");
+}
 const METRICS=[
   {k:"kcal",label:"Calories",unit:"kcal",c:"var(--kcal)",mode:"target",sub:"calories vs target"},
   {k:"protein",label:"Protein",unit:"g",c:"var(--protein)",mode:"min",sub:"grams per day, target is a minimum"},
