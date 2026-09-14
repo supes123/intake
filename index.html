@@ -96,6 +96,13 @@ header.top{display:flex;justify-content:space-between;align-items:flex-end;gap:1
 .mt-qty{display:block;font-size:12px;color:var(--muted);font-weight:400}
 .tag{display:inline-block;font-size:9px;letter-spacing:.05em;text-transform:uppercase;font-weight:700;color:var(--accent);background:var(--accent-soft);padding:0 4px;border-radius:3px;margin-left:6px;vertical-align:1px}
 .x{font-size:12px;font-weight:500;color:var(--over);background:none;border:0;padding:0 0 0 6px;cursor:pointer;font-family:inherit;vertical-align:1px}
+/* photos */
+.photo-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:10px}
+.photo-row .btn{flex:0 0 auto;padding:8px 12px;min-height:40px;font-size:14px}
+.thumbs{display:flex;gap:8px;flex-wrap:wrap}
+.thumb{position:relative;width:56px;height:56px;border-radius:8px;overflow:hidden;border:1px solid var(--line)}
+.thumb img{width:100%;height:100%;object-fit:cover;display:block}
+.thumb button{position:absolute;top:2px;right:2px;width:20px;height:20px;border-radius:50%;border:0;background:rgba(0,0,0,.6);color:#fff;font-size:13px;line-height:20px;padding:0;cursor:pointer}
 /* buttons/forms */
 button{font:inherit}
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:12px;padding:12px 16px;font-weight:500;cursor:pointer;min-height:46px}
@@ -213,7 +220,12 @@ details.help p{font-size:14px}
         </button>
         <textarea id="logText" placeholder="e.g. two eggs on toast with butter, a chicken shawarma at lunch, salmon and roast potatoes, two glasses of red wine…"></textarea>
       </div>
-      <p class="hint" id="micHint">Tap the mic and talk, or use the keyboard's dictation key. Rough portions are fine.</p>
+      <div class="photo-row">
+        <button class="btn" id="photoBtn" type="button"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg> Add a photo</button>
+        <input type="file" id="photoIn" accept="image/*" capture="environment" multiple hidden>
+        <div class="thumbs" id="thumbs"></div>
+      </div>
+      <p class="hint" id="micHint">Talk, type, or photograph the plate — or any mix. Rough portions are fine; a label in shot gets read.</p>
       <div class="row" style="margin-top:8px">
         <button class="btn primary" id="estimateBtn" type="button">Estimate with Claude</button>
       </div>
@@ -564,8 +576,15 @@ function notice(sel,msg,err){const n=$(sel);n.hidden=!msg;n.className="notice"+(
 
 /* ============ log: estimate with Claude ============ */
 let pending=null;
+/* ---- photos: resized on-device, sent with the description, never stored ---- */
+let photos=[]; // [{data:base64,media:"image/jpeg"}]
+$("#photoBtn").addEventListener("click",()=>$("#photoIn").click());
+$("#photoIn").addEventListener("change",async e=>{for(const f of e.target.files){try{photos.push(await shrinkImage(f));}catch(err){notice("#logNotice","Couldn't read that photo.",true);}}e.target.value="";renderThumbs();});
+function renderThumbs(){$("#thumbs").innerHTML=photos.map((p,i)=>`<div class="thumb"><img src="data:${p.media};base64,${p.data}" alt="Photo ${i+1}"><button type="button" data-rm="${i}" aria-label="Remove photo">×</button></div>`).join("");}
+$("#thumbs").addEventListener("click",e=>{const b=e.target.closest("[data-rm]");if(!b)return;photos.splice(+b.dataset.rm,1);renderThumbs();});
+function shrinkImage(file,max=1280,q=.82){return new Promise((res,rej)=>{const url=URL.createObjectURL(file);const img=new Image();img.onload=()=>{const r=Math.min(1,max/Math.max(img.width,img.height));const c=document.createElement("canvas");c.width=Math.round(img.width*r);c.height=Math.round(img.height*r);c.getContext("2d").drawImage(img,0,0,c.width,c.height);URL.revokeObjectURL(url);const d=c.toDataURL("image/jpeg",q);res({media:"image/jpeg",data:d.split(",")[1]});};img.onerror=()=>{URL.revokeObjectURL(url);rej(new Error("decode"));};img.src=url;});}
 $("#estimateBtn").addEventListener("click",async()=>{
-  const text=$("#logText").value.trim(); if(!text)return notice("#logNotice","Describe what you ate first.",true);
+  const text=$("#logText").value.trim(); if(!text&&!photos.length)return notice("#logNotice","Describe what you ate, or add a photo, first.",true);
   if(!cfg.apiKey)return notice("#logNotice","Add your Anthropic API key in Settings first.",true);
   const btn=$("#estimateBtn");btn.disabled=true;btn.textContent="Estimating…";notice("#logNotice","");
   try{pending=await estimate(text);pending.date=$("#logDate").value||today();renderPreview();$("#previewPanel").hidden=false;$("#previewPanel").scrollIntoView({behavior:"smooth",block:"start"});}
@@ -575,11 +594,12 @@ $("#estimateBtn").addEventListener("click",async()=>{
 async function estimate(text,prior){
   const sys=`You estimate nutrition from a spoken description of what someone ate. The description was dictated, so expect run-on text and mis-heard food names; interpret charitably (e.g. "koala" dressing is a mis-hearing of a brand). 
 
-BRANDED PRODUCTS: whenever an item is a named commercial product (a brand, a supermarket own-label, a specific bar, drink, cereal, ready meal, sauce or dressing), call the lookup_product tool to get its label values from Open Food Facts instead of estimating. Search with the brand and product name as printed on the pack, without quantities ("Green & Black's dark 70%", "Hellmann's real mayonnaise", "Tnuva cottage cheese 5%"). Pick the result that best matches; if the first search misses, try once more with different wording, then fall back to your own estimate. Scale the per-100g label values to the quantity eaten (use serving_size or the pack quantity when the person says "a bar", "a pot", "a can"). Sodium: use sodium_100g (grams) x 1000, or salt_100g x 400. In desc, say which product record you used, e.g. "(label: Green & Black's Dark 70%, 45 g)". For unbranded or home-cooked food, estimate from McCance & Widdowson / USDA values and typical UK and Israeli home and restaurant portions. Portions: when vague, assume a normal adult portion, leaning slightly generous. Alcohol counts at 7 kcal/g inside the meal's kcal. Keep kcal consistent with macros (4/4/9).
+PHOTOS: if images are attached, identify each food on the plate, estimate portion sizes from visual cues (plate diameter ~27 cm for a dinner plate, cutlery, hand, packaging), and set qty to what you inferred, e.g. "~180 g, judged from plate". If a label or packaging is legible, read the product name and use it for a lookup; if the nutrition panel itself is legible, use those printed values and set source "label: read from pack". Text accompanying the photo overrides what you see (e.g. "I only ate half"). BRANDED PRODUCTS: whenever an item is a named commercial product (a brand, a supermarket own-label, a specific bar, drink, cereal, ready meal, sauce or dressing), call the lookup_product tool to get its label values from Open Food Facts instead of estimating. Search with the brand and product name as printed on the pack, without quantities ("Green & Black's dark 70%", "Hellmann's real mayonnaise", "Tnuva cottage cheese 5%"). Pick the result that best matches; if the first search misses, try once more with different wording, then fall back to your own estimate. Scale the per-100g label values to the quantity eaten (use serving_size or the pack quantity when the person says "a bar", "a pot", "a can"). Sodium: use sodium_100g (grams) x 1000, or salt_100g x 400. In desc, say which product record you used, e.g. "(label: Green & Black's Dark 70%, 45 g)". For unbranded or home-cooked food, estimate from McCance & Widdowson / USDA values and typical UK and Israeli home and restaurant portions. Portions: when vague, assume a normal adult portion, leaning slightly generous. Alcohol counts at 7 kcal/g inside the meal's kcal. Keep kcal consistent with macros (4/4/9).
 
 FINAL ANSWER: when done looking things up, call submit_estimate exactly once with the whole day. Never reply in prose and never ask a question — if something is ambiguous, make the most likely assumption and record it in "assumption". One item per distinct food or drink (a salad with dressing is two items). Do not include meal totals; the app sums the items. Grams for protein/carbs/fat/satfat/fibre/sugar, milligrams for sodium, integers throughout. Only include meals the person mentioned.`;
   const tools=[{name:"lookup_product",description:"Search the Open Food Facts database for a packaged product's label nutrition (per 100 g and serving size). Returns up to 6 matching products.",input_schema:{type:"object",properties:{query:{type:"string",description:"Brand and product name as printed on the pack, no quantities"},country:{type:"string",description:"Optional 2-letter country hint: gb, il, us"}},required:["query"]}}];
-  const messages=prior?[...prior,{role:"user",content:"AMENDMENT to the estimate above: "+text+"\n\nApply this amendment and call submit_estimate again with the complete revised day (all meals, not just the changed one). Keep every meal the amendment does not mention exactly as it was. Re-scale label values or re-estimate as needed. Use lookup_product again only if a product is newly named."}]:[{role:"user",content:text}]; let lookups=0;
+  const firstContent=[...photos.map(p=>({type:"image",source:{type:"base64",media_type:p.media,data:p.data}})),{type:"text",text:text||"Photo(s) of what I ate. Identify the food and estimate the portions from the picture."}];
+  const messages=prior?[...prior,{role:"user",content:"AMENDMENT to the estimate above: "+text+"\n\nApply this amendment and call submit_estimate again with the complete revised day (all meals, not just the changed one). Keep every meal the amendment does not mention exactly as it was. Re-scale label values or re-estimate as needed. Use lookup_product again only if a product is newly named."}]:[{role:"user",content:firstContent}]; let lookups=0;
   const NUTP={type:"integer"};
   const itemSchema={type:"object",properties:{name:{type:"string"},qty:{type:"string"},source:{type:"string"},kcal:NUTP,protein:NUTP,carbs:NUTP,fat:NUTP,satfat:NUTP,fibre:NUTP,sugar:NUTP,sodium:NUTP},required:["name","qty","source","kcal","protein","carbs","fat","satfat","fibre","sugar","sodium"]};
   tools.push({name:"submit_estimate",description:"Submit the finished nutrition estimate for the whole day described. Call this exactly once, after any product lookups.",input_schema:{type:"object",properties:{meals:{type:"array",items:{type:"object",properties:{name:{type:"string",description:"Breakfast, Lunch, Dinner, Snack or Drinks"},items:{type:"array",items:itemSchema}},required:["name","items"]}},note:{type:"string"},assumption:{type:"string"}},required:["meals","note","assumption"]}});
@@ -643,12 +663,12 @@ $("#amendBtn").addEventListener("click",async()=>{
   }catch(e){notice("#amendNotice","Amendment failed: "+(e.message||e),true);}
   finally{btn.disabled=false;btn.textContent="Apply amendment";}
 });
-$("#discardBtn").addEventListener("click",()=>{pending=null;$("#amendText").value="";notice("#amendNotice","");$("#previewPanel").hidden=true;});
+$("#discardBtn").addEventListener("click",()=>{photos=[];renderThumbs();pending=null;$("#amendText").value="";notice("#amendNotice","");$("#previewPanel").hidden=true;});
 $("#saveBtn").addEventListener("click",()=>{
   if(!pending)return; const d=ensureDay(pending.date), now=new Date().toISOString();
   pending.meals.forEach(m=>d.meals.push({...m,id:uid(),loggedAt:now,source:"app"}));
   if(pending.note){d.notes=pending.note;d.notesAt=now;}
-  viewDate=pending.date;pending=null;$("#amendText").value="";notice("#amendNotice","");$("#previewPanel").hidden=true;$("#logText").value="";dirtyThenSync();showView("today");
+  viewDate=pending.date;pending=null;photos=[];renderThumbs();$("#amendText").value="";notice("#amendNotice","");$("#previewPanel").hidden=true;$("#logText").value="";dirtyThenSync();showView("today");
 });
 
 /* ============ settings ============ */
