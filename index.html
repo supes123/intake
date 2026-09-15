@@ -95,6 +95,7 @@ header.top{display:flex;justify-content:space-between;align-items:flex-end;gap:1
 .mt-name{min-width:0;overflow-wrap:anywhere}
 .mt-qty{display:block;font-size:12px;color:var(--muted);font-weight:400}
 .tag{display:inline-block;font-size:9px;letter-spacing:.05em;text-transform:uppercase;font-weight:700;color:var(--accent);background:var(--accent-soft);padding:0 4px;border-radius:3px;margin-left:6px;vertical-align:1px}
+.x.edit{color:var(--accent)}
 .x{font-size:12px;font-weight:500;color:var(--over);background:none;border:0;padding:0 0 0 6px;cursor:pointer;font-family:inherit;vertical-align:1px}
 /* photos */
 .photo-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:10px}
@@ -232,7 +233,7 @@ details.help p{font-size:14px}
       <div id="logNotice" style="margin-top:10px" hidden></div>
     </div>
     <div class="panel" id="previewPanel" hidden>
-      <div class="panel-h"><h2>Check the estimate</h2><span class="muted small">edit any number</span></div>
+      <div class="panel-h"><h2 id="previewTitle">Check the estimate</h2><span class="muted small" id="previewSub">edit any number</span></div>
       <div class="preview" id="preview"></div>
       <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line)">
         <div class="eyebrow" style="margin-bottom:8px">Amend by voice</div>
@@ -458,7 +459,7 @@ function mealsHtml(d,del){
   return head+meals.map(m=>{const items=m.items||[];
     const rows=items.length?items.map(it=>`<div class="mt-row"><span class="mt-name">${esc(it.name)}${it.source&&/label/i.test(it.source)?`<span class="tag" title="${esc(it.source)}">label</span>`:""}${it.qty?`<span class="mt-qty">${esc(it.qty)}</span>`:""}</span><span class="num">${fmt(it.kcal)}</span><span class="num">${fmt(it.protein)}</span><span class="num">${fmt(it.carbs)}</span><span class="num">${fmt(it.fat)}</span></div>`).join("")
       :`<div class="mt-row"><span class="mt-name">${esc(m.desc||"")}</span><span></span><span></span><span></span><span></span></div>`;
-    return `<div class="mt-meal"><div class="mt-row mt-total"><span class="mt-name">${esc(m.name||"Meal")}${del?` <button class="x" data-del="${d.date}|${m.id}" type="button">Remove</button>`:""}</span><span class="num">${fmt(m.kcal)}</span><span class="num">${fmt(m.protein)}</span><span class="num">${fmt(m.carbs)}</span><span class="num">${fmt(m.fat)}</span></div>${rows}</div>`;}).join("");
+    return `<div class="mt-meal"><div class="mt-row mt-total"><span class="mt-name">${esc(m.name||"Meal")}${del?` <button class="x edit" data-edit="${d.date}|${m.id}" type="button">Edit</button><button class="x" data-del="${d.date}|${m.id}" type="button">Remove</button>`:""}</span><span class="num">${fmt(m.kcal)}</span><span class="num">${fmt(m.protein)}</span><span class="num">${fmt(m.carbs)}</span><span class="num">${fmt(m.fat)}</span></div>${rows}</div>`;}).join("");
 }
 const METRICS=[
   {k:"kcal",label:"Calories",unit:"kcal",c:"var(--kcal)",mode:"target",sub:"calories vs target"},
@@ -535,6 +536,12 @@ $("#dayPrev").addEventListener("click",()=>shiftDay(-1));$("#dayNext").addEventL
   $("#chartDots").addEventListener("click",e=>{const b=e.target.closest("[data-ci]");if(!b)return;const i=+b.dataset.ci;if(i!==chartIdx){const dir=i>chartIdx?1:-1;chartIdx=i-dir;shiftChart(dir);}});
   $("#chart").addEventListener("click",()=>shiftChart(1));
   document.addEventListener("keydown",e=>{if(!$("#view-history").classList.contains("active")||/INPUT|TEXTAREA/.test(document.activeElement.tagName))return;if(e.key==="ArrowLeft")shiftChart(-1);if(e.key==="ArrowRight")shiftChart(1);});})();
+document.addEventListener("click",e=>{const b=e.target.closest("[data-edit]");if(!b)return;const [date,id]=b.dataset.edit.split("|");const d=S.days[date];const m=d&&d.meals.find(x=>x.id===id);if(!m)return;
+  const copy=normMeal(JSON.parse(JSON.stringify(m)));
+  pending={date,meals:[copy],note:"",assumption:"",lookups:0,editingId:id,convo:[{role:"user",content:"This meal was logged earlier for "+date+". Here it is as recorded: "+JSON.stringify({meals:[{name:copy.name,items:copy.items}]})}]};
+  showView("log");fillLogDates();if([...$("#logDate").options].some(o=>o.value===date))$("#logDate").value=date;
+  renderPreview();$("#previewPanel").hidden=false;$("#previewTitle").textContent="Editing "+(m.name||"meal")+" · "+nice(date);$("#previewSub").textContent="change numbers, or say what to change";$("#saveBtn").textContent="Save changes";
+  setTimeout(()=>$("#previewPanel").scrollIntoView({behavior:"smooth",block:"start"}),50);});
 document.addEventListener("click",e=>{const b=e.target.closest("[data-del]");if(!b)return;const [date,id]=b.dataset.del.split("|");const d=S.days[date];if(!d)return;if(!confirm("Remove this meal?"))return;d.meals=d.meals.filter(m=>m.id!==id);d.deleted=[...(d.deleted||[]),id];dirtyThenSync();});
 
 /* ============ weight ============ */
@@ -587,7 +594,7 @@ $("#estimateBtn").addEventListener("click",async()=>{
   const text=$("#logText").value.trim(); if(!text&&!photos.length)return notice("#logNotice","Describe what you ate, or add a photo, first.",true);
   if(!cfg.apiKey)return notice("#logNotice","Add your Anthropic API key in Settings first.",true);
   const btn=$("#estimateBtn");btn.disabled=true;btn.textContent="Estimating…";notice("#logNotice","");
-  try{pending=await estimate(text);pending.date=$("#logDate").value||today();renderPreview();$("#previewPanel").hidden=false;$("#previewPanel").scrollIntoView({behavior:"smooth",block:"start"});}
+  try{resetPreviewChrome();pending=await estimate(text);pending.date=$("#logDate").value||today();renderPreview();$("#previewPanel").hidden=false;$("#previewPanel").scrollIntoView({behavior:"smooth",block:"start"});}
   catch(e){notice("#logNotice","Estimate failed: "+(e.message||e),true);}
   finally{btn.disabled=false;btn.textContent="Estimate with Claude";}
 });
@@ -636,6 +643,7 @@ async function lookupProduct(query,country){
   const j=await r.json(); const n=(p,k)=>{const v=p.nutriments?.[k];return v==null?null:Math.round(Number(v)*10)/10;};
   return {count:j.count,products:(j.products||[]).map(p=>({name:p.product_name,brand:p.brands,pack:p.quantity,serving_size:p.serving_size,per_100g:{kcal:n(p,"energy-kcal_100g"),protein:n(p,"proteins_100g"),carbs:n(p,"carbohydrates_100g"),fat:n(p,"fat_100g"),satfat:n(p,"saturated-fat_100g"),fibre:n(p,"fiber_100g"),sugar:n(p,"sugars_100g"),salt:n(p,"salt_100g"),sodium:n(p,"sodium_100g")},per_serving_kcal:n(p,"energy-kcal_serving"),countries:(p.countries_tags||[]).slice(0,3)}))};
 }
+function resetPreviewChrome(){$("#previewTitle").textContent="Check the estimate";$("#previewSub").textContent="edit any number";$("#saveBtn").textContent="Add to the day";}
 function renderPreview(){
   const p=pending; p.meals.forEach(m=>{if(m.items)rollup(m);}); const tot={};NUT.forEach(k=>tot[k]=p.meals.reduce((a,m)=>a+(m[k]||0),0));
   $("#preview").innerHTML=`<div class="tot"><div><span class="k num">${fmt(tot.kcal)}</span> <span class="muted">kcal</span></div><div class="muted small num">P ${fmt(tot.protein)} · C ${fmt(tot.carbs)} · F ${fmt(tot.fat)} · fibre ${fmt(tot.fibre)} g</div></div>
@@ -658,17 +666,21 @@ $("#amendBtn").addEventListener("click",async()=>{
     // include any manual edits made in the grid so the revision starts from what is on screen
     const current={meals:pending.meals,note:pending.note||"",assumption:pending.assumption||""};
     const convo=[...(pending.convo||[]).slice(0,-1),{role:"assistant",content:JSON.stringify(current)}];
-    const revised=await estimate(text,convo); revised.date=pending.date; revised.lookups=(pending.lookups||0)+(revised.lookups||0);
+    const revised=await estimate(text,convo); revised.date=pending.date; revised.editingId=pending.editingId; revised.lookups=(pending.lookups||0)+(revised.lookups||0);
     pending=revised; $("#amendText").value=""; renderPreview(); notice("#amendNotice","Revised. Check the numbers again.");
   }catch(e){notice("#amendNotice","Amendment failed: "+(e.message||e),true);}
   finally{btn.disabled=false;btn.textContent="Apply amendment";}
 });
-$("#discardBtn").addEventListener("click",()=>{photos=[];renderThumbs();pending=null;$("#amendText").value="";notice("#amendNotice","");$("#previewPanel").hidden=true;});
+$("#discardBtn").addEventListener("click",()=>{resetPreviewChrome();photos=[];renderThumbs();pending=null;$("#amendText").value="";notice("#amendNotice","");$("#previewPanel").hidden=true;});
 $("#saveBtn").addEventListener("click",()=>{
   if(!pending)return; const d=ensureDay(pending.date), now=new Date().toISOString();
-  pending.meals.forEach(m=>d.meals.push({...m,id:uid(),loggedAt:now,source:"app"}));
+  if(pending.editingId){const i=d.meals.findIndex(x=>x.id===pending.editingId);const m=pending.meals[0];
+    if(i>=0){d.meals[i]={...d.meals[i],...m,id:pending.editingId,editedAt:now};}
+    // any extra meals Claude split out during an amendment become new meals
+    pending.meals.slice(1).forEach(x=>d.meals.push({...x,id:uid(),loggedAt:now,source:"app"}));}
+  else pending.meals.forEach(m=>d.meals.push({...m,id:uid(),loggedAt:now,source:"app"}));
   if(pending.note){d.notes=pending.note;d.notesAt=now;}
-  viewDate=pending.date;pending=null;photos=[];renderThumbs();$("#amendText").value="";notice("#amendNotice","");$("#previewPanel").hidden=true;$("#logText").value="";dirtyThenSync();showView("today");
+  viewDate=pending.date;resetPreviewChrome();pending=null;photos=[];renderThumbs();$("#amendText").value="";notice("#amendNotice","");$("#previewPanel").hidden=true;$("#logText").value="";dirtyThenSync();showView("today");
 });
 
 /* ============ settings ============ */
