@@ -87,6 +87,8 @@ header.top{display:flex;justify-content:space-between;align-items:flex-end;gap:1
 .mt-head{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:700;padding:0 10px 6px;border-bottom:1px solid var(--line)}
 .mt-head span:not(:first-child),.mt-row span.num{text-align:right}
 .mt-meal{margin-top:8px;background:var(--bg);border-radius:10px;padding:8px 10px}
+.mt-meal.ex{background:var(--accent-soft)}
+.mt-meal.ex .mt-total .num,.mt-meal.ex .mt-row .num{color:var(--accent)}
 .mt-total{font-weight:700;font-size:16px;padding-bottom:6px;border-bottom:1px solid var(--line);margin-bottom:4px}
 .mt-total .num{font-size:16px}
 .mt-row:not(.mt-total){font-size:14px;padding:3px 0;color:var(--ink)}
@@ -191,7 +193,7 @@ details.help p{font-size:14px}
             <circle cx="60" cy="60" r="52" fill="none" stroke="var(--line)" stroke-width="10"/>
             <circle id="ringArc" cx="60" cy="60" r="52" fill="none" stroke="var(--kcal)" stroke-width="10" stroke-linecap="round" stroke-dasharray="0 327"/>
           </svg>
-          <div class="c"><div class="big num" id="ringKcal">–</div><div class="of">of <span class="num" id="ringTarget">–</span> kcal</div></div>
+          <div class="c"><div class="big num" id="ringKcal">–</div><div class="of">of <span class="num" id="ringTarget">–</span> kcal</div><div class="of num" id="ringEx" style="margin-top:2px;font-size:11px;color:var(--accent)"></div></div>
         </div>
         <div class="macros" id="macros"></div>
       </div>
@@ -219,7 +221,7 @@ details.help p{font-size:14px}
         <button class="mic" id="micBtn" type="button" aria-label="Dictate" title="Dictate">
           <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
         </button>
-        <textarea id="logText" placeholder="e.g. two eggs on toast with butter, a chicken shawarma at lunch, salmon and roast potatoes, two glasses of red wine…"></textarea>
+        <textarea id="logText" placeholder="e.g. two eggs on toast, chicken shawarma at lunch, salmon and roast potatoes, two glasses of red… and an hour of weights this morning"></textarea>
       </div>
       <div class="photo-row">
         <button class="btn" id="photoBtn" type="button"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg> Add a photo</button>
@@ -334,7 +336,7 @@ const fmt=n=>n==null||isNaN(n)?"–":Math.round(n).toLocaleString("en-GB");
 const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
 const NUT=["kcal","protein","carbs","fat","satfat","fibre","sugar","sodium"];
-const DEFAULT_T={kcal:2000,protein:150,carbs:205,fat:65,fibre:30,satfat:20,sugar:50,sodium:2300};
+const DEFAULT_T={kcal:2000,protein:150,carbs:205,fat:65,fibre:30,satfat:20,sugar:50,sodium:2300,exCredit:50};
 const ls={get(k,d){try{const v=localStorage.getItem(k);return v==null?d:JSON.parse(v);}catch{return d;}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v));}catch{}},del(k){try{localStorage.removeItem(k);}catch{}}};
 
 /* ============ state ============ */
@@ -344,7 +346,9 @@ let cfg=ls.get("intake.cfg",{dbxKey:"",dbxFolder:"/Investments/AI models/Intake 
 let tok=ls.get("intake.dbx",null); // {access, refresh, exp}
 let rev=ls.get("intake.rev",null);
 
-function dayTotals(d){const t={};NUT.forEach(k=>t[k]=0);(d.meals||[]).forEach(m=>NUT.forEach(k=>t[k]+=Number(m[k])||0));return t;}
+function isEx(m){return m&&m.type==="exercise";}
+function dayTotals(d){const t={};NUT.forEach(k=>t[k]=0);(d.meals||[]).filter(m=>!isEx(m)).forEach(m=>NUT.forEach(k=>t[k]+=Number(m[k])||0));t.exercise=(d.meals||[]).filter(isEx).reduce((a,m)=>a+(Number(m.kcal)||0),0);t.exMinutes=(d.meals||[]).filter(isEx).reduce((a,m)=>a+(m.items||[]).reduce((b,i)=>b+(Number(i.minutes)||0),0),0);return t;}
+function allowance(t,T){return T.kcal+Math.round((t?t.exercise:0)*((T.exCredit==null?50:T.exCredit)/100));}
 function ensureDay(date){if(!S.days[date])S.days[date]={date,meals:[],notes:""};return S.days[date];}
 function persist(){S.updated=new Date().toISOString();ls.set("intake.state",S);}
 function dirtyThenSync(){persist();render();scheduleSync();}
@@ -378,8 +382,8 @@ async function maybeClaudeSummary(d,t,T,force){
   try{
     const recent=[];for(let i=1;i<=6;i++){const dt=parse(d.date);dt.setDate(dt.getDate()-i);const k=iso(dt);const dd=S.days[k];if(dd&&dd.meals.length){const tt=dayTotals(dd);recent.push({date:k,kcal:tt.kcal,protein:tt.protein,fat:tt.fat,fibre:tt.fibre,sodium:tt.sodium,items:dd.meals.flatMap(m=>(m.items||[]).map(i=>i.name)).slice(0,12)});}}
     const w=Object.keys(S.weights).sort().slice(-4).map(k=>({date:k,kg:S.weights[k]}));
-    const payload={date:d.date,dayComplete:d.date<today(),targets:T,totals:t,meals:d.meals.map(m=>({name:m.name,kcal:m.kcal,items:(m.items||[]).map(i=>({name:i.name,qty:i.qty,kcal:i.kcal,protein:i.protein,carbs:i.carbs,fat:i.fat,satfat:i.satfat,fibre:i.fibre,sugar:i.sugar,sodium:i.sodium}))})),previousDays:recent,recentWeights:w};
-    const sys=`You are reviewing one day of a 52-year-old man's food log. He trains with weights three times a week, is aiming to lose about 0.5 kg a week, and wants direct, specific, useful feedback — no cheerleading, no lecturing, no generic nutrition advice. Name the actual items that drove each outcome, with their numbers. Where the previous days show a pattern (the same item recurring, protein consistently short, sodium high most days), say so — that is more valuable than the single day. If the day is still open ("dayComplete": false) speak about it as in progress and say what the rest of the day should do. Keep the sixth-form-biology tone out of it; write like a sharp friend who happens to know nutrition. British spelling. Return ONLY JSON: {"verdict":"one sentence, the single most important thing about this day","good":["0-3 short sentences on what worked, each naming items"],"bad":["0-3 short sentences on what did not, each naming items and numbers"],"next":"one concrete, specific suggestion for tomorrow or the rest of today, based on his actual habits shown here — or empty string"}`;
+    const payload={date:d.date,dayComplete:d.date<today(),targets:T,allowanceToday:allowance(t,T),exerciseKcalBurned:t.exercise,exerciseCreditedPercent:T.exCredit==null?50:T.exCredit,exercise:d.meals.filter(isEx).flatMap(m=>(m.items||[]).map(i=>({name:i.name,qty:i.qty,minutes:i.minutes,kcal:i.kcal}))),totals:t,meals:d.meals.filter(m=>!isEx(m)).map(m=>({name:m.name,kcal:m.kcal,items:(m.items||[]).map(i=>({name:i.name,qty:i.qty,kcal:i.kcal,protein:i.protein,carbs:i.carbs,fat:i.fat,satfat:i.satfat,fibre:i.fibre,sugar:i.sugar,sodium:i.sodium}))})),previousDays:recent,recentWeights:w};
+    const sys=`You are reviewing one day of a 52-year-old man's food log. He trains with weights three times a week, is aiming to lose about 0.5 kg a week, and wants direct, specific, useful feedback — no cheerleading, no lecturing, no generic nutrition advice. Name the actual items that drove each outcome, with their numbers. Where the previous days show a pattern (the same item recurring, protein consistently short, sodium high most days), say so — that is more valuable than the single day. Exercise is credited to the calorie allowance at the stated percentage (deliberately not 100%, because burn estimates run high and routine training is already in the base target) — judge calories against allowanceToday, not the bare target, and comment on training when it is there. If the day is still open ("dayComplete": false) speak about it as in progress and say what the rest of the day should do. Keep the sixth-form-biology tone out of it; write like a sharp friend who happens to know nutrition. British spelling. Return ONLY JSON: {"verdict":"one sentence, the single most important thing about this day","good":["0-3 short sentences on what worked, each naming items"],"bad":["0-3 short sentences on what did not, each naming items and numbers"],"next":"one concrete, specific suggestion for tomorrow or the rest of today, based on his actual habits shown here — or empty string"}`;
     const stool=[{name:"write_summary",description:"Return the review of the day.",input_schema:{type:"object",properties:{verdict:{type:"string"},good:{type:"array",items:{type:"string"}},bad:{type:"array",items:{type:"string"}},next:{type:"string"}},required:["verdict","good","bad","next"]}}];
     const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"content-type":"application/json","x-api-key":cfg.apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:cfg.apiModel||"claude-sonnet-5",max_tokens:1200,system:sys.replace("Return ONLY JSON:","Call write_summary with:"),tools:stool,tool_choice:{type:"tool",name:"write_summary"},messages:[{role:"user",content:JSON.stringify(payload)}]})});
     if(!r.ok)throw new Error(r.status);
@@ -394,15 +398,16 @@ async function maybeClaudeSummary(d,t,T,force){
 document.addEventListener("click",e=>{if(e.target.id!=="summaryRefresh")return;const d=S.days[viewDate];if(!d)return;delete d.summary;delete d.summaryHash;$("#summaryMeta").textContent="asking Claude…";maybeClaudeSummary(d,dayTotals(d),S.targets,true);});
 function daySummary(d,t,T){
   if(!d||!d.meals.length||!t)return "";
-  const isToday=d.date===today(), items=[]; d.meals.forEach(m=>(m.items&&m.items.length?m.items:[{name:m.desc||m.name,kcal:m.kcal,protein:m.protein,carbs:m.carbs,fat:m.fat,satfat:m.satfat||0,fibre:m.fibre||0,sugar:m.sugar||0,sodium:m.sodium||0}]).forEach(it=>items.push({...it,meal:m.name})));
+  const isToday=d.date===today(), items=[]; d.meals.filter(m=>!isEx(m)).forEach(m=>(m.items&&m.items.length?m.items:[{name:m.desc||m.name,kcal:m.kcal,protein:m.protein,carbs:m.carbs,fat:m.fat,satfat:m.satfat||0,fibre:m.fibre||0,sugar:m.sugar||0,sodium:m.sodium||0}]).forEach(it=>items.push({...it,meal:m.name})));
   const top=(k,n=2)=>[...items].filter(i=>(i[k]||0)>0).sort((a,b)=>(b[k]||0)-(a[k]||0)).slice(0,n);
   const list=arr=>arr.map((x,i)=>x).join(i=>"");
   const names=arr=>arr.map(i=>i.name.toLowerCase()).join(" and ");
   const pct=(v,tg)=>Math.round(v/tg*100);
   const good=[],bad=[],neutral=[];
   // calories
-  const kd=t.kcal-T.kcal;
-  if(kd>150){const tk=top("kcal");bad.push(`Calories ran ${fmt(kd)} over the ${fmt(T.kcal)} target. ${tk.length?`The biggest share came from ${names(tk)} (${tk.map(i=>fmt(i.kcal)).join(" and ")} kcal).`:""}`);}
+  const A=allowance(t,T), kd=t.kcal-A;
+  if(t.exercise)good.push(`Exercise logged: ${fmt(t.exercise)} kcal burned${t.exMinutes?` over ${fmt(t.exMinutes)} min`:""}; ${fmt(A-T.kcal)} kcal credited to today's allowance.`);
+  if(kd>150){const tk=top("kcal");bad.push(`Calories ran ${fmt(kd)} over the ${fmt(A)} allowance. ${tk.length?`The biggest share came from ${names(tk)} (${tk.map(i=>fmt(i.kcal)).join(" and ")} kcal).`:""}`);}
   else if(kd<-500&&isToday)neutral.push(`${fmt(-kd)} kcal still in hand for the rest of the day.`);
   else if(kd<-500)bad.push(`The day finished ${fmt(-kd)} kcal under target — a large deficit on its own is fine occasionally, but repeated it tends to lead to a rebound.`);
   else good.push(`Calories landed within ${fmt(Math.abs(kd))} kcal of target.`);
@@ -439,12 +444,13 @@ function renderToday(){
   $("#todaySub").textContent=diff===0?nice(viewDate):diff===1?nice(viewDate):diff+" days ago";
   $("#dayNext").disabled=diff===0;
   const pill=$("#todayPill");
+  const A=allowance(t,T), exK=t?t.exercise:0;
   if(!t||!d.meals.length){pill.className="pill none";pill.textContent="nothing logged";}
-  else{const over=k>T.kcal;pill.className="pill"+(over?" over":"");pill.textContent=over?fmt(k-T.kcal)+" kcal over":fmt(T.kcal-k)+" kcal left";}
-  $("#ringKcal").textContent=t?fmt(k):"0";$("#ringTarget").textContent=fmt(T.kcal);
-  const C=2*Math.PI*52, frac=Math.min(1,k/T.kcal);
+  else{const over=k>A;pill.className="pill"+(over?" over":"");pill.textContent=over?fmt(k-A)+" kcal over":fmt(A-k)+" kcal left";}
+  $("#ringKcal").textContent=t?fmt(k):"0";$("#ringTarget").textContent=fmt(A);$("#ringEx").textContent=exK?`${fmt(T.kcal)} + ${fmt(A-T.kcal)} exercise`:"";
+  const C=2*Math.PI*52, frac=Math.min(1,k/A);
   $("#ringArc").setAttribute("stroke-dasharray",(frac*C).toFixed(1)+" "+C.toFixed(1));
-  $("#ringArc").setAttribute("stroke",k>T.kcal?"var(--over)":"var(--kcal)");
+  $("#ringArc").setAttribute("stroke",k>A?"var(--over)":"var(--kcal)");
   const rows=[["protein","Protein","g","var(--protein)",false],["carbs","Carbs","g","var(--carbs)",false],["fat","Fat","g","var(--fat)",false],["fibre","Fibre","g","var(--fibre)",false],["satfat","Sat fat","g","var(--faint)",true],["sugar","Sugar","g","var(--faint)",true],["sodium","Sodium","mg","var(--faint)",true]];
   $("#macros").innerHTML=rows.map(([key,lab,u,c,cap])=>{const v=t?t[key]:0,tg=T[key]||1,over=cap?v>tg:(key!=="fibre"&&v>tg*1.15);return `<div class="m"><span class="lab">${lab}</span><div class="bar"><i style="--c:${over?"var(--over)":c};width:${Math.min(100,v/tg*100).toFixed(0)}%"></i></div><span class="val num" title="${cap?"ceiling":"target"} ${fmt(tg)} ${u}"><b>${fmt(v)}</b> / ${fmt(tg)} ${u}</span></div>`;}).join("");
   const ul=$("#todayMeals"); ul.innerHTML=d?mealsHtml(d,true):""; $("#todayEmpty").hidden=!!(d&&d.meals.length);
@@ -454,12 +460,14 @@ function renderToday(){
   const wv=S.weights[viewDate]; const w=Object.keys(S.weights).filter(k=>k<=viewDate).sort().pop(); $("#lastWeight").textContent=wv?`${wv} kg`:(w?`last: ${S.weights[w]} kg on ${nice(w)}`:"");
 }
 function mealsHtml(d,del){
-  const meals=d.meals||[]; if(!meals.length)return "";
-  const head=`<div class="mt-head"><span>Item</span><span>kcal</span><span>P</span><span>C</span><span>F</span></div>`;
+  const all=d.meals||[]; if(!all.length)return "";
+  const meals=all.filter(m=>!isEx(m)), ex=all.filter(isEx);
+  const head=meals.length?`<div class="mt-head"><span>Item</span><span>kcal</span><span>P</span><span>C</span><span>F</span></div>`:"";
+  const exHtml=ex.length?`<div class="mt-head" style="margin-top:14px"><span>Exercise</span><span>kcal</span><span></span><span></span><span>min</span></div>`+ex.map(m=>`<div class="mt-meal ex"><div class="mt-row mt-total"><span class="mt-name">${esc(m.name||"Exercise")}${del?` <button class="x edit" data-edit="${d.date}|${m.id}" type="button">Edit</button><button class="x" data-del="${d.date}|${m.id}" type="button">Remove</button>`:""}</span><span class="num">−${fmt(m.kcal)}</span><span></span><span></span><span class="num">${fmt((m.items||[]).reduce((a,i)=>a+(Number(i.minutes)||0),0))}</span></div>${(m.items||[]).map(it=>`<div class="mt-row"><span class="mt-name">${esc(it.name)}${it.qty?`<span class="mt-qty">${esc(it.qty)}</span>`:""}</span><span class="num">−${fmt(it.kcal)}</span><span></span><span></span><span class="num">${fmt(it.minutes)}</span></div>`).join("")}</div>`).join(""):"";
   return head+meals.map(m=>{const items=m.items||[];
     const rows=items.length?items.map(it=>`<div class="mt-row"><span class="mt-name">${esc(it.name)}${it.source&&/label/i.test(it.source)?`<span class="tag" title="${esc(it.source)}">label</span>`:""}${it.qty?`<span class="mt-qty">${esc(it.qty)}</span>`:""}</span><span class="num">${fmt(it.kcal)}</span><span class="num">${fmt(it.protein)}</span><span class="num">${fmt(it.carbs)}</span><span class="num">${fmt(it.fat)}</span></div>`).join("")
       :`<div class="mt-row"><span class="mt-name">${esc(m.desc||"")}</span><span></span><span></span><span></span><span></span></div>`;
-    return `<div class="mt-meal"><div class="mt-row mt-total"><span class="mt-name">${esc(m.name||"Meal")}${del?` <button class="x edit" data-edit="${d.date}|${m.id}" type="button">Edit</button><button class="x" data-del="${d.date}|${m.id}" type="button">Remove</button>`:""}</span><span class="num">${fmt(m.kcal)}</span><span class="num">${fmt(m.protein)}</span><span class="num">${fmt(m.carbs)}</span><span class="num">${fmt(m.fat)}</span></div>${rows}</div>`;}).join("");
+    return `<div class="mt-meal"><div class="mt-row mt-total"><span class="mt-name">${esc(m.name||"Meal")}${del?` <button class="x edit" data-edit="${d.date}|${m.id}" type="button">Edit</button><button class="x" data-del="${d.date}|${m.id}" type="button">Remove</button>`:""}</span><span class="num">${fmt(m.kcal)}</span><span class="num">${fmt(m.protein)}</span><span class="num">${fmt(m.carbs)}</span><span class="num">${fmt(m.fat)}</span></div>${rows}</div>`;}).join("")+exHtml;
 }
 const METRICS=[
   {k:"kcal",label:"Calories",unit:"kcal",c:"var(--kcal)",mode:"target",sub:"calories vs target"},
@@ -476,13 +484,13 @@ function niceTicks(max){const raw=max/4,pow=Math.pow(10,Math.floor(Math.log10(ra
 function renderChart(){
   const T=S.targets, M=METRICS[chartIdx], tg=T[M.k]||0;
   const N=14, now=new Date(), pts=[];
-  for(let i=N-1;i>=0;i--){const dt=new Date(now);dt.setDate(now.getDate()-i);const key=iso(dt);const d=S.days[key];pts.push({key,v:d&&d.meals.length?dayTotals(d)[M.k]:null});}
+  for(let i=N-1;i>=0;i--){const dt=new Date(now);dt.setDate(now.getDate()-i);const key=iso(dt);const d=S.days[key];const tt=d&&d.meals.length?dayTotals(d):null;pts.push({key,v:tt?tt[M.k]:null,allow:tt?allowance(tt,T):tg});}
   const W=680,H=420,L=58,R=14,Tp=34,B=50,iw=W-L-R,ih=H-Tp-B, maxV=Math.max(tg*1.3,...pts.map(p=>p.v||0))*1.05||1, y=v=>Tp+ih-(v/maxV)*ih, bw=iw/N, gap=bw*.22;
-  const colour=v=>M.mode==="min"?(v>=tg?M.c:M.c+`" opacity=".38`):(v>tg?"var(--over)":M.c);
+  const colour=(v,p)=>M.mode==="min"?(v>=tg?M.c:M.c+`" opacity=".38`):(v>(M.k==="kcal"?p.allow:tg)?"var(--over)":M.c);
   let s=`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${M.label} per day, last 14 days">`;
   niceTicks(maxV).forEach(t=>{s+=`<line x1="${L}" x2="${W-R}" y1="${y(t)}" y2="${y(t)}" stroke="var(--line)"/><text x="${L-6}" y="${y(t)+4}" text-anchor="end" font-size="16" fill="var(--muted)">${t>=1000?(t/1000)+"k":t}</text>`;});
   pts.forEach((p,i)=>{const x=L+i*bw+gap/2,w=bw-gap,dt=parse(p.key);
-    if(p.v!=null){const h=Math.max(3,y(0)-y(p.v));s+=`<rect x="${x.toFixed(1)}" y="${(y(0)-h).toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" rx="4" fill="${colour(p.v)}"><title>${nice(p.key)}: ${fmt(p.v)} ${M.unit}</title></rect>`;
+    if(p.v!=null){const h=Math.max(3,y(0)-y(p.v));s+=`<rect x="${x.toFixed(1)}" y="${(y(0)-h).toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" rx="4" fill="${colour(p.v,p)}"><title>${nice(p.key)}: ${fmt(p.v)} ${M.unit}${M.k==="kcal"&&p.allow!==tg?` (allowance ${fmt(p.allow)})`:""}</title></rect>`;
       const lbl=p.v>=10000?Math.round(p.v/1000)+"k":p.v>=1000&&M.k!=="kcal"?(p.v/1000).toFixed(1)+"k":fmt(p.v);
       s+=`<text x="${(x+w/2).toFixed(1)}" y="${(y(0)-h-6).toFixed(1)}" text-anchor="middle" font-size="15" font-weight="600" fill="var(--ink)">${lbl}</text>`;}
     else s+=`<rect x="${x.toFixed(1)}" y="${(y(0)-4).toFixed(1)}" width="${w.toFixed(1)}" height="4" rx="2" fill="var(--faint)" opacity=".6"/>`;
@@ -516,7 +524,7 @@ function renderSettings(){
   const dp=$("#dbxPill");dp.className="pill"+(tok?"":" none");dp.textContent=tok?"connected":"not connected";
   const ap=$("#apiPill");ap.className="pill"+(cfg.apiKey?"":" none");ap.textContent=cfg.apiKey?"key saved":"no key";
   $("#dbxInfo").textContent=location.protocol==="https:"?`Redirect URI to register in the Dropbox App Console: ${location.origin+location.pathname}`:"Open the app over https to connect Dropbox.";
-  $("#targetForm").innerHTML=[["kcal","Calories","kcal"],["protein","Protein","g"],["carbs","Carbs","g"],["fat","Fat","g"],["fibre","Fibre (min)","g"],["satfat","Sat fat (max)","g"],["sugar","Sugar (max)","g"],["sodium","Sodium (max)","mg"]].map(([k,l,u])=>`<label class="f"><span><b>${l}</b> ${u}</span><input type="number" inputmode="numeric" data-t="${k}" value="${S.targets[k]}"></label>`).join("");
+  $("#targetForm").innerHTML=[["exCredit","Exercise credit","% of burn added to allowance"],["kcal","Calories","kcal"],["protein","Protein","g"],["carbs","Carbs","g"],["fat","Fat","g"],["fibre","Fibre (min)","g"],["satfat","Sat fat (max)","g"],["sugar","Sugar (max)","g"],["sodium","Sodium (max)","mg"]].map(([k,l,u])=>`<label class="f"><span><b>${l}</b> ${u}</span><input type="number" inputmode="numeric" data-t="${k}" value="${S.targets[k]}"></label>`).join("");
   const nDays=Object.values(S.days).filter(d=>d.meals&&d.meals.length).length, nMeals=Object.values(S.days).reduce((a,d)=>a+(d.meals||[]).length,0);
   $("#dataInfo").innerHTML=`<dt>Days logged</dt><dd class="num">${nDays}</dd><dt>Meals</dt><dd class="num">${nMeals}</dd><dt>Last change</dt><dd>${S.updated?new Date(S.updated).toLocaleString("en-GB"):"–"}</dd><dt>Last sync</dt><dd>${lastSync?new Date(lastSync).toLocaleString("en-GB"):"never"}</dd>`;
 }
@@ -603,13 +611,14 @@ async function estimate(text,prior){
 
 PHOTOS: if images are attached, identify each food on the plate, estimate portion sizes from visual cues (plate diameter ~27 cm for a dinner plate, cutlery, hand, packaging), and set qty to what you inferred, e.g. "~180 g, judged from plate". If a label or packaging is legible, read the product name and use it for a lookup; if the nutrition panel itself is legible, use those printed values and set source "label: read from pack". Text accompanying the photo overrides what you see (e.g. "I only ate half"). BRANDED PRODUCTS: whenever an item is a named commercial product (a brand, a supermarket own-label, a specific bar, drink, cereal, ready meal, sauce or dressing), call the lookup_product tool to get its label values from Open Food Facts instead of estimating. Search with the brand and product name as printed on the pack, without quantities ("Green & Black's dark 70%", "Hellmann's real mayonnaise", "Tnuva cottage cheese 5%"). Pick the result that best matches; if the first search misses, try once more with different wording, then fall back to your own estimate. Scale the per-100g label values to the quantity eaten (use serving_size or the pack quantity when the person says "a bar", "a pot", "a can"). Sodium: use sodium_100g (grams) x 1000, or salt_100g x 400. In desc, say which product record you used, e.g. "(label: Green & Black's Dark 70%, 45 g)". For unbranded or home-cooked food, estimate from McCance & Widdowson / USDA values and typical UK and Israeli home and restaurant portions. Portions: when vague, assume a normal adult portion, leaning slightly generous. Alcohol counts at 7 kcal/g inside the meal's kcal. Keep kcal consistent with macros (4/4/9).
 
-FINAL ANSWER: when done looking things up, call submit_estimate exactly once with the whole day. Never reply in prose and never ask a question — if something is ambiguous, make the most likely assumption and record it in "assumption". One item per distinct food or drink (a salad with dressing is two items). Do not include meal totals; the app sums the items. Grams for protein/carbs/fat/satfat/fibre/sugar, milligrams for sodium, integers throughout. Only include meals the person mentioned.`;
+EXERCISE: the description may also include physical activity ("did an hour of weights", "walked 6 km", "45 minutes on the bike"). Put each activity in "exercise", not in meals, with minutes and an estimate of calories burned above resting for an 80 kg, 52-year-old man using MET values (weights, moderate ~3.5–5 MET; brisk walk ~4; running ~9–10; cycling moderate ~7; swimming ~6–8). Be conservative — real-world burn is usually lower than fitness watches claim. If only exercise is described, return an empty meals array. FINAL ANSWER: when done looking things up, call submit_estimate exactly once with the whole day. Never reply in prose and never ask a question — if something is ambiguous, make the most likely assumption and record it in "assumption". One item per distinct food or drink (a salad with dressing is two items). Do not include meal totals; the app sums the items. Grams for protein/carbs/fat/satfat/fibre/sugar, milligrams for sodium, integers throughout. Only include meals the person mentioned.`;
   const tools=[{name:"lookup_product",description:"Search the Open Food Facts database for a packaged product's label nutrition (per 100 g and serving size). Returns up to 6 matching products.",input_schema:{type:"object",properties:{query:{type:"string",description:"Brand and product name as printed on the pack, no quantities"},country:{type:"string",description:"Optional 2-letter country hint: gb, il, us"}},required:["query"]}}];
   const firstContent=[...photos.map(p=>({type:"image",source:{type:"base64",media_type:p.media,data:p.data}})),{type:"text",text:text||"Photo(s) of what I ate. Identify the food and estimate the portions from the picture."}];
   const messages=prior?[...prior,{role:"user",content:"AMENDMENT to the estimate above: "+text+"\n\nApply this amendment and call submit_estimate again with the complete revised day (all meals, not just the changed one). Keep every meal the amendment does not mention exactly as it was. Re-scale label values or re-estimate as needed. Use lookup_product again only if a product is newly named."}]:[{role:"user",content:firstContent}]; let lookups=0;
   const NUTP={type:"integer"};
   const itemSchema={type:"object",properties:{name:{type:"string"},qty:{type:"string"},source:{type:"string"},kcal:NUTP,protein:NUTP,carbs:NUTP,fat:NUTP,satfat:NUTP,fibre:NUTP,sugar:NUTP,sodium:NUTP},required:["name","qty","source","kcal","protein","carbs","fat","satfat","fibre","sugar","sodium"]};
-  tools.push({name:"submit_estimate",description:"Submit the finished nutrition estimate for the whole day described. Call this exactly once, after any product lookups.",input_schema:{type:"object",properties:{meals:{type:"array",items:{type:"object",properties:{name:{type:"string",description:"Breakfast, Lunch, Dinner, Snack or Drinks"},items:{type:"array",items:itemSchema}},required:["name","items"]}},note:{type:"string"},assumption:{type:"string"}},required:["meals","note","assumption"]}});
+  const exSchema={type:"object",properties:{name:{type:"string",description:"e.g. Weights session, Walk, Swim"},qty:{type:"string",description:"duration and intensity you assumed, e.g. '55 min, moderate'"},minutes:{type:"integer"},kcal:{type:"integer",description:"estimated calories burned above resting, for an 80 kg 52-year-old man"},source:{type:"string",description:"e.g. 'MET 5.0'"}},required:["name","qty","minutes","kcal","source"]};
+  tools.push({name:"submit_estimate",description:"Submit the finished estimate for everything described: food as meals, physical activity as exercise. Call this exactly once, after any product lookups.",input_schema:{type:"object",properties:{meals:{type:"array",items:{type:"object",properties:{name:{type:"string",description:"Breakfast, Lunch, Dinner, Snack or Drinks"},items:{type:"array",items:itemSchema}},required:["name","items"]}},exercise:{type:"array",description:"Activities mentioned; empty array if none",items:exSchema},note:{type:"string"},assumption:{type:"string"}},required:["meals","exercise","note","assumption"]}});
   for(let round=0;round<8;round++){
     const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"content-type":"application/json","x-api-key":cfg.apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:cfg.apiModel||"claude-sonnet-5",max_tokens:6000,system:sys,tools,tool_choice:{type:"any"},messages})});
     if(!r.ok){let m="";try{m=(await r.json()).error?.message||"";}catch{}throw new Error(r.status+" "+m);}
@@ -617,7 +626,7 @@ FINAL ANSWER: when done looking things up, call submit_estimate exactly once wit
     if(j.stop_reason==="max_tokens")throw new Error("The reply was cut off — try logging the day in two halves.");
     const uses=(j.content||[]).filter(c=>c.type==="tool_use");
     const done=uses.find(c=>c.name==="submit_estimate");
-    if(done){const out=done.input||{};out.meals=(out.meals||[]).map(x=>normMeal(x));out.note=String(out.note||"");out.assumption=String(out.assumption||"");out.lookups=lookups;
+    if(done){const out=done.input||{};out.meals=(out.meals||[]).map(x=>normMeal(x));if(Array.isArray(out.exercise)&&out.exercise.length)out.meals.push(normEx(out.exercise));out.note=String(out.note||"");out.assumption=String(out.assumption||"");out.lookups=lookups;
       out.convo=[...messages,{role:"assistant",content:JSON.stringify({meals:out.meals,note:out.note,assumption:out.assumption})}];return out;}
     if(!uses.length){const txt=(j.content||[]).map(c=>c.text||"").join("").trim();throw new Error(txt?("Claude replied in words instead of numbers: "+txt.slice(0,160)):"No estimate returned");}
     messages.push({role:"assistant",content:j.content});
@@ -629,7 +638,9 @@ FINAL ANSWER: when done looking things up, call submit_estimate exactly once wit
   }
   throw new Error("Too many product lookups without a result — try again with fewer brand names.");
 }
+function normEx(list){const o={type:"exercise",name:"Exercise",items:(list||[]).map(e=>({name:String(e.name||"Activity"),qty:String(e.qty||""),source:String(e.source||""),minutes:Math.max(0,Math.round(Number(e.minutes)||0)),kcal:Math.max(0,Math.round(Number(e.kcal)||0)),protein:0,carbs:0,fat:0,satfat:0,fibre:0,sugar:0,sodium:0}))};rollup(o);return o;}
 function normMeal(x){
+  if(x&&x.type==="exercise")return normEx(x.items||[]);
   const o={name:x.name||"Meal",items:[]};
   const items=Array.isArray(x.items)&&x.items.length?x.items:[{name:x.desc||x.name||"Item",qty:"",source:"",...x}];
   o.items=items.map(it=>{const r={name:String(it.name||"Item"),qty:String(it.qty||""),source:String(it.source||"")};NUT.forEach(k=>r[k]=Math.max(0,Math.round(Number(it[k])||0)));return r;});
@@ -648,7 +659,7 @@ function renderPreview(){
   const p=pending; p.meals.forEach(m=>{if(m.items)rollup(m);}); const tot={};NUT.forEach(k=>tot[k]=p.meals.reduce((a,m)=>a+(m[k]||0),0));
   $("#preview").innerHTML=`<div class="tot"><div><span class="k num">${fmt(tot.kcal)}</span> <span class="muted">kcal</span></div><div class="muted small num">P ${fmt(tot.protein)} · C ${fmt(tot.carbs)} · F ${fmt(tot.fat)} · fibre ${fmt(tot.fibre)} g</div></div>
   <div class="edit-grid"><div class="h">Item</div><div class="h">kcal</div><div class="h">P</div><div class="h">C</div><div class="h">F</div>
-  ${p.meals.map((m,i)=>`<input class="t mealname" data-i="${i}" data-k="name" value="${esc(m.name)}" aria-label="Meal name"><b class="num" style="text-align:right">${fmt(m.kcal)}</b><b class="num" style="text-align:right">${fmt(m.protein)}</b><b class="num" style="text-align:right">${fmt(m.carbs)}</b><b class="num" style="text-align:right">${fmt(m.fat)}</b>
+  ${p.meals.map((m,i)=>`<input class="t mealname" data-i="${i}" data-k="name" value="${esc(m.name)}" aria-label="Meal name"><b class="num" style="text-align:right">${isEx(m)?"−":""}${fmt(m.kcal)}</b><b class="num" style="text-align:right">${fmt(m.protein)}</b><b class="num" style="text-align:right">${fmt(m.carbs)}</b><b class="num" style="text-align:right">${fmt(m.fat)}</b>
     ${(m.items||[]).map((it,j)=>`<div class="item-name"><input class="t" data-i="${i}" data-j="${j}" data-k="name" value="${esc(it.name)}" aria-label="Item"><div class="hint">${esc(it.qty)}${it.source?` · ${esc(it.source)}`:""}</div></div><input data-i="${i}" data-j="${j}" data-k="kcal" type="number" value="${it.kcal}"><input data-i="${i}" data-j="${j}" data-k="protein" type="number" value="${it.protein}"><input data-i="${i}" data-j="${j}" data-k="carbs" type="number" value="${it.carbs}"><input data-i="${i}" data-j="${j}" data-k="fat" type="number" value="${it.fat}">`).join("")}
     <div style="grid-column:1/-1;height:6px"></div>`).join("")}</div>
   ${p.lookups?`<p class="hint">${p.lookups} product label${p.lookups>1?"s":""} looked up on Open Food Facts.</p>`:""}${p.assumption?`<p class="hint">Assumed: ${esc(p.assumption)}</p>`:""}${p.note?`<p class="hint" style="font-style:italic">${esc(p.note)}</p>`:""}`;
@@ -745,6 +756,7 @@ async function processInbox(state){
     const r=await download(f.path_lower);if(!r)continue; let j=null;try{j=JSON.parse(r.text);}catch{}
     if(j){const items=Array.isArray(j)?j:(j.days||[j]);const inc={version:1,days:{},weights:{},processedInbox:[]};
       items.forEach(it=>{if(!it||!it.date)return;const meals=(it.meals||[]).map((m,i)=>({...(Array.isArray(m.items)&&m.items.length?normMeal(m):{name:m.name||"Meal",desc:m.desc||"",...Object.fromEntries(NUT.map(k=>[k,Math.max(0,Math.round(Number(m[k])||0))]))}),id:m.id||(f.name.replace(/\.json$/i,"")+"-"+i),loggedAt:m.loggedAt||it.loggedAt||f.client_modified||new Date().toISOString(),source:m.source||it.source||"check-in"}));
+        if(Array.isArray(it.exercise)&&it.exercise.length)meals.push({...normEx(it.exercise),id:f.name.replace(/\.json$/i,"")+"-ex",loggedAt:it.loggedAt||f.client_modified||new Date().toISOString(),source:it.source||"check-in"});
         inc.days[it.date]={date:it.date,meals,notes:it.notes||"",notesAt:it.notes?(it.loggedAt||f.client_modified):null};if(it.weightKg)inc.weights[it.date]=it.weightKg;});
       state=mergeState(state,inc);}
     state.processedInbox=[...(state.processedInbox||[]),f.name].slice(-500);
