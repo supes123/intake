@@ -12,11 +12,11 @@ jobs:
         id: gate
         run: |
           H=$(TZ=Europe/London date +%H)
-          echo "uk_hour=$H" >> "$GITHUB_OUTPUT"
-          if [ "$H" = "21" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then echo "go=yes" >> "$GITHUB_OUTPUT"; else echo "go=no" >> "$GITHUB_OUTPUT"; fi
+          echo "UK hour is $H"
+          if [ "$H" = "21" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then echo "go=yes" >> "$GITHUB_OUTPUT"; else echo "go=no" >> "$GITHUB_OUTPUT"; echo "Not 21:00 UK — nothing to do."; fi
       - uses: actions/setup-node@v4
         if: steps.gate.outputs.go == 'yes'
-        with: { node-version: 20 }
+        with: { node-version: 22 }
       - name: Send the push
         if: steps.gate.outputs.go == 'yes'
         env:
@@ -27,9 +27,18 @@ jobs:
           npm i --silent web-push@3
           node -e '
             const wp=require("web-push");
-            if(!process.env.PUSH_SUBSCRIPTION){console.log("No PUSH_SUBSCRIPTION secret set — nothing to send.");process.exit(0);}
-            wp.setVapidDetails("mailto:reminder@example.com",process.env.VAPID_PUBLIC,process.env.VAPID_PRIVATE);
-            const sub=JSON.parse(process.env.PUSH_SUBSCRIPTION);
+            const priv=(process.env.VAPID_PRIVATE||"").trim(), subRaw=(process.env.PUSH_SUBSCRIPTION||"").trim();
+            if(!priv){console.error("::error::The VAPID_PRIVATE secret is missing or empty. Add it under Settings → Secrets and variables → Actions.");process.exit(1);}
+            if(!/^[A-Za-z0-9_-]{40,50}$/.test(priv)){console.error("::error::VAPID_PRIVATE does not look like the key from VAPID_PRIVATE.txt (expected one line of 43 letters/digits/-/_ ; got "+priv.length+" characters).");process.exit(1);}
+            if(!subRaw){console.log("PUSH_SUBSCRIPTION secret not set yet — enable the reminder in the app, then paste the subscription as a secret. Nothing sent.");process.exit(0);}
+            let sub;try{sub=JSON.parse(subRaw);}catch(e){console.error("::error::PUSH_SUBSCRIPTION is not valid JSON — copy it again from the app (Settings → Daily reminder → Copy subscription) and paste the whole thing, starting with { and ending with }.");process.exit(1);}
+            if(!sub.endpoint||!sub.keys||!sub.keys.p256dh||!sub.keys.auth){console.error("::error::PUSH_SUBSCRIPTION is missing endpoint or keys — copy it again from the app.");process.exit(1);}
+            wp.setVapidDetails("mailto:reminder@example.com",process.env.VAPID_PUBLIC,priv);
             const body=JSON.stringify({title:"Intake Ledger",body:"What did you eat today? Tap to log it — food and exercise."});
-            wp.sendNotification(sub,body,{TTL:6*3600,urgency:"high"}).then(r=>console.log("sent",r.statusCode)).catch(e=>{console.error("push failed",e.statusCode,e.body);process.exit(e.statusCode===410?0:1);});
+            wp.sendNotification(sub,body,{TTL:6*3600,urgency:"high"})
+              .then(r=>console.log("Sent — push service replied "+r.statusCode))
+              .catch(e=>{console.error("::error::Push failed with status "+e.statusCode+": "+(e.body||e.message));
+                if(e.statusCode===410||e.statusCode===404)console.error("::error::The phone subscription has expired. In the app: Settings → Daily reminder → Turn off, then Enable again, copy, and update the PUSH_SUBSCRIPTION secret.");
+                if(e.statusCode===401||e.statusCode===403)console.error("::error::The push service rejected the signature — VAPID_PRIVATE does not match the key built into the app.");
+                process.exit(1);});
           '
