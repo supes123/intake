@@ -1,0 +1,35 @@
+name: Daily reminder
+on:
+  schedule:
+    - cron: "0 20 * * *"   # 21:00 UK during British Summer Time
+    - cron: "0 21 * * *"   # 21:00 UK during GMT
+  workflow_dispatch:        # "Run workflow" button for testing
+jobs:
+  remind:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Only fire when it is 21:00 in the UK
+        id: gate
+        run: |
+          H=$(TZ=Europe/London date +%H)
+          echo "uk_hour=$H" >> "$GITHUB_OUTPUT"
+          if [ "$H" = "21" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then echo "go=yes" >> "$GITHUB_OUTPUT"; else echo "go=no" >> "$GITHUB_OUTPUT"; fi
+      - uses: actions/setup-node@v4
+        if: steps.gate.outputs.go == 'yes'
+        with: { node-version: 20 }
+      - name: Send the push
+        if: steps.gate.outputs.go == 'yes'
+        env:
+          VAPID_PRIVATE: ${{ secrets.VAPID_PRIVATE }}
+          PUSH_SUBSCRIPTION: ${{ secrets.PUSH_SUBSCRIPTION }}
+          VAPID_PUBLIC: "BCNG7-oLI5UbnftAzO0-XoxsvVWkQzzJgr5kbCG4PDL2MIn_1L-UKnp4pNUCYe_EwMGTBz-sroLMFJ-d3LZ0kDQ"
+        run: |
+          npm i --silent web-push@3
+          node -e '
+            const wp=require("web-push");
+            if(!process.env.PUSH_SUBSCRIPTION){console.log("No PUSH_SUBSCRIPTION secret set — nothing to send.");process.exit(0);}
+            wp.setVapidDetails("mailto:reminder@example.com",process.env.VAPID_PUBLIC,process.env.VAPID_PRIVATE);
+            const sub=JSON.parse(process.env.PUSH_SUBSCRIPTION);
+            const body=JSON.stringify({title:"Intake Ledger",body:"What did you eat today? Tap to log it — food and exercise."});
+            wp.sendNotification(sub,body,{TTL:6*3600,urgency:"high"}).then(r=>console.log("sent",r.statusCode)).catch(e=>{console.error("push failed",e.statusCode,e.body);process.exit(e.statusCode===410?0:1);});
+          '
