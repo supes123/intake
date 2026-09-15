@@ -289,6 +289,18 @@ details.help p{font-size:14px}
       </div>
     </div>
     <div class="panel">
+      <div class="panel-h"><h2>Daily reminder</h2><span class="pill none" id="pushPill">off</span></div>
+      <div style="display:grid;gap:10px">
+        <p class="hint" style="margin:0">A notification on this phone at 9 pm UK time asking what you ate. It is sent by the reminder job in your GitHub repository, so it needs a one-off paste: enable below, copy the subscription, and save it as the repository secret <code>PUSH_SUBSCRIPTION</code>.</p>
+        <div class="row">
+          <button class="btn primary" id="pushEnable" type="button">Enable on this phone</button>
+          <button class="btn" id="pushCopy" type="button" disabled>Copy subscription</button>
+        </div>
+        <button class="btn ghost" id="pushDisable" type="button" style="justify-self:start">Turn off</button>
+        <p class="hint" id="pushInfo"></p>
+      </div>
+    </div>
+    <div class="panel">
       <div class="panel-h"><h2>Claude</h2><span class="pill none" id="apiPill">no key</span></div>
       <div style="display:grid;gap:10px">
         <label class="f"><span><b>Anthropic API key</b> — stays on this device only</span><input id="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="sk-ant-…"></label>
@@ -765,13 +777,40 @@ async function processInbox(state){
   return state;
 }
 
+/* ============ push reminder ============ */
+const VAPID_PUBLIC="BCNG7-oLI5UbnftAzO0-XoxsvVWkQzzJgr5kbCG4PDL2MIn_1L-UKnp4pNUCYe_EwMGTBz-sroLMFJ-d3LZ0kDQ";
+function b64ToU8(b){const p="=".repeat((4-b.length%4)%4);const s=(b+p).replace(/-/g,"+").replace(/_/g,"/");const r=atob(s);return Uint8Array.from([...r].map(c=>c.charCodeAt(0)));}
+let pushSub=null;
+async function pushState(){
+  const ok="serviceWorker" in navigator&&"PushManager" in window&&location.protocol==="https:";
+  const pill=$("#pushPill"),info=$("#pushInfo");
+  if(!ok){pill.className="pill none";pill.textContent="unavailable";info.textContent="Notifications need the installed app over https.";$("#pushEnable").disabled=true;return;}
+  try{const reg=await navigator.serviceWorker.ready;pushSub=await reg.pushManager.getSubscription();}catch{pushSub=null;}
+  const saved=ls.get("intake.pushSaved",null);
+  if(pushSub){pill.className="pill";pill.textContent=saved===pushSub.endpoint?"on":"needs pasting";$("#pushCopy").disabled=false;
+    info.textContent=saved===pushSub.endpoint?"Subscribed. The 9 pm reminder comes from the repository job.":"Subscribed on this phone — now copy the subscription and save it as the PUSH_SUBSCRIPTION secret in the repository (Settings → Secrets and variables → Actions).";}
+  else{pill.className="pill none";pill.textContent=Notification.permission==="denied"?"blocked":"off";$("#pushCopy").disabled=true;info.textContent=Notification.permission==="denied"?"Notifications are blocked for this app in Android settings.":"";}
+}
+$("#pushEnable").addEventListener("click",async()=>{try{
+  const perm=await Notification.requestPermission();if(perm!=="granted"){$("#pushInfo").textContent="Permission not granted.";return pushState();}
+  const reg=await navigator.serviceWorker.ready;
+  pushSub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:b64ToU8(VAPID_PUBLIC)});
+  ls.del("intake.pushSaved");await pushState();
+  try{await navigator.clipboard.writeText(JSON.stringify(pushSub.toJSON()));$("#pushInfo").textContent="Subscribed and copied to the clipboard — paste it as the PUSH_SUBSCRIPTION secret in the repository, then tap Copy subscription again if you need it later.";}catch{}
+}catch(e){$("#pushInfo").textContent="Could not subscribe: "+(e.message||e);}});
+$("#pushCopy").addEventListener("click",async()=>{if(!pushSub)return;const txt=JSON.stringify(pushSub.toJSON());try{await navigator.clipboard.writeText(txt);ls.set("intake.pushSaved",pushSub.endpoint);$("#pushInfo").textContent="Copied. Paste it as the PUSH_SUBSCRIPTION secret.";pushState();}catch{prompt("Copy this:",txt);ls.set("intake.pushSaved",pushSub.endpoint);pushState();}});
+$("#pushDisable").addEventListener("click",async()=>{try{if(pushSub)await pushSub.unsubscribe();}catch{}pushSub=null;ls.del("intake.pushSaved");pushState();});
+// arriving from a notification tap: open the Log tab
+if(new URLSearchParams(location.search).get("log")==="1"){history.replaceState({},"",location.pathname);setTimeout(()=>showView("log"),0);}
+navigator.serviceWorker&&navigator.serviceWorker.addEventListener("message",e=>{if(e.data&&e.data.type==="open-log")showView("log");});
+
 /* ============ boot ============ */
 render(); fillLogDates();
 if(tok)setSync("","Connected");
 handleRedirect().then(()=>{if(tok&&!location.search)sync(false);});
 document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible"&&tok)sync(false);});
 window.addEventListener("online",()=>tok&&sync(false));
-if("serviceWorker" in navigator&&location.protocol==="https:")navigator.serviceWorker.register("sw.js").catch(()=>{});
+if("serviceWorker" in navigator&&location.protocol==="https:")navigator.serviceWorker.register("sw.js").then(()=>pushState()).catch(()=>{});else{try{pushState();}catch{}}
 </script>
 </body>
 </html>
