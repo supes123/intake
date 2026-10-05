@@ -344,6 +344,7 @@ details.help p{font-size:14px}
     <div class="panel">
       <div class="panel-h"><h2>Data</h2></div>
       <dl class="kv" id="dataInfo"></dl>
+      <p class="hint" style="margin:8px 0 0">App version <b id="appVersion"></b></p>
       <div class="row" style="margin-top:10px">
         <button class="btn" id="exportBtn" type="button">Copy JSON</button>
         <button class="btn" id="importBtn" type="button">Paste JSON</button>
@@ -868,8 +869,9 @@ $("#pushDisable").addEventListener("click",async()=>{try{if(pushSub)await pushSu
 if(new URLSearchParams(location.search).get("log")==="1"){history.replaceState({},"",location.pathname);setTimeout(()=>showView("log"),0);}
 navigator.serviceWorker&&navigator.serviceWorker.addEventListener("message",e=>{if(e.data&&e.data.type==="open-log")showView("log");});
 
+const APP_VERSION="2026-10-05b";
 /* ============ boot ============ */
-render(); fillLogDates();
+render(); fillLogDates(); try{$("#appVersion").textContent=APP_VERSION;}catch{}
 if(tok)setSync("","Connected");
 handleRedirect().then(()=>{if(tok&&!location.search)sync(false);});
 document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible"&&tok)sync(false);});
