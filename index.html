@@ -317,7 +317,7 @@ details.help p{font-size:14px}
       <div class="panel-h"><h2>Claude</h2><span class="pill none" id="apiPill">no key</span></div>
       <div style="display:grid;gap:10px">
         <label class="f"><span><b>Anthropic API key</b> — stays on this device only</span><input id="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="sk-ant-…"></label>
-        <label class="f"><span><b>Model</b></span><input id="apiModel" autocomplete="off" spellcheck="false" placeholder="claude-sonnet-5"></label>
+        <label class="f"><span><b>Model</b> — <code>claude-sonnet-5-5</code> is the sensible default; <code>claude-opus-5-5</code> judges photos and portions a little better for about twice the (small) cost</span><input id="apiModel" autocomplete="off" spellcheck="false" placeholder="claude-sonnet-5-5"></label>
         <button class="btn" id="apiTest" type="button">Save and test</button>
         <p class="hint" id="apiInfo"></p>
       </div>
@@ -382,10 +382,11 @@ const ls={get(k,d){try{const v=localStorage.getItem(k);return v==null?d:JSON.par
 let S=ls.get("intake.state",null)||{version:1,updated:null,targets:{...DEFAULT_T},days:{},weights:{},processedInbox:[]};
 S.targets={...DEFAULT_T,...(S.targets||{})}; S.profile=S.profile||{}; S.days=S.days||{}; S.weights=S.weights||{}; S.processedInbox=S.processedInbox||[];
 /* ---- sharing defaults: fill DEFAULT_DBX_KEY with the app key from your Dropbox App Console so people you share the link with do not need one ---- */
-const DEFAULT_DBX_KEY="6dyr7r7m6pdkjy7";
+const DEFAULT_DBX_KEY="";
 const DEFAULT_FOLDER="/Intake Ledger";
-let cfg=ls.get("intake.cfg",{dbxKey:DEFAULT_DBX_KEY,dbxFolder:DEFAULT_FOLDER,apiKey:"",apiModel:"claude-sonnet-5"});
+let cfg=ls.get("intake.cfg",{dbxKey:DEFAULT_DBX_KEY,dbxFolder:DEFAULT_FOLDER,apiKey:"",apiModel:"claude-sonnet-5-5"});
 if(!cfg.dbxKey&&DEFAULT_DBX_KEY)cfg.dbxKey=DEFAULT_DBX_KEY;
+if(cfg.apiModel==="claude-sonnet-5"){cfg.apiModel="claude-sonnet-5-5";ls.set("intake.cfg",cfg);}
 let tok=ls.get("intake.dbx",null); // {access, refresh, exp}
 let rev=ls.get("intake.rev",null);
 
@@ -442,7 +443,7 @@ async function maybeClaudeSummary(d,t,T,force){
     const payload={date:d.date,dayComplete:d.date<today(),targets:T,allowanceToday:allowance(t,T),exerciseKcalBurned:t.exercise,exerciseCreditedPercent:T.exCredit==null?50:T.exCredit,exercise:d.meals.filter(isEx).flatMap(m=>(m.items||[]).map(i=>({name:i.name,qty:i.qty,minutes:i.minutes,kcal:i.kcal}))),totals:t,meals:d.meals.filter(m=>!isEx(m)).map(m=>({name:m.name,kcal:m.kcal,items:(m.items||[]).map(i=>({name:i.name,qty:i.qty,kcal:i.kcal,protein:i.protein,carbs:i.carbs,fat:i.fat,satfat:i.satfat,fibre:i.fibre,sugar:i.sugar,sodium:i.sodium}))})),previousDays:recent,recentWeights:w};
     const pt=profileText(); const sys=`You are reviewing one day of a ${pt.who}'s food log. ${pt.act?`They are ${pt.act}`:""}${pt.goal?`${pt.act?" and":"They are"} aiming to ${pt.goal}`:""}${pt.act||pt.goal?". ":""}${pt.note?pt.note+". ":""}They want direct, specific, useful feedback — no cheerleading, no lecturing, no generic nutrition advice. Name the actual items that drove each outcome, with their numbers. Where the previous days show a pattern (the same item recurring, protein consistently short, sodium high most days), say so — that is more valuable than the single day. Exercise is credited to the calorie allowance at the stated percentage (deliberately not 100%, because burn estimates run high and routine training is already in the base target) — judge calories against allowanceToday, not the bare target, and comment on training when it is there. If the day is still open ("dayComplete": false) speak about it as in progress and say what the rest of the day should do. Keep the sixth-form-biology tone out of it; write like a sharp friend who happens to know nutrition. British spelling. Refer to the person as "you". Return ONLY JSON: {"verdict":"one sentence, the single most important thing about this day","good":["0-3 short sentences on what worked, each naming items"],"bad":["0-3 short sentences on what did not, each naming items and numbers"],"next":"one concrete, specific suggestion for tomorrow or the rest of today, based on his actual habits shown here — or empty string"}`;
     const stool=[{name:"write_summary",description:"Return the review of the day.",input_schema:{type:"object",properties:{verdict:{type:"string"},good:{type:"array",items:{type:"string"}},bad:{type:"array",items:{type:"string"}},next:{type:"string"}},required:["verdict","good","bad","next"]}}];
-    const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"content-type":"application/json","x-api-key":cfg.apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:cfg.apiModel||"claude-sonnet-5",max_tokens:1200,system:sys.replace("Return ONLY JSON:","Call write_summary with:"),tools:stool,tool_choice:{type:"tool",name:"write_summary"},messages:[{role:"user",content:JSON.stringify(payload)}]})});
+    const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"content-type":"application/json","x-api-key":cfg.apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:cfg.apiModel||"claude-sonnet-5-5",max_tokens:1200,system:sys.replace("Return ONLY JSON:","Call write_summary with:"),tools:stool,tool_choice:{type:"tool",name:"write_summary"},messages:[{role:"user",content:JSON.stringify(payload)}]})});
     if(!r.ok)throw new Error(r.status);
     const j=await r.json();const use=(j.content||[]).find(c=>c.type==="tool_use");if(!use)throw new Error("no summary");
     const sum=use.input||{}; const day=S.days[d.date]; if(!day)return;
@@ -683,7 +684,7 @@ EXERCISE: the description may also include physical activity ("did an hour of we
   const exSchema={type:"object",properties:{name:{type:"string",description:"e.g. Weights session, Walk, Swim"},qty:{type:"string",description:"duration and intensity you assumed, e.g. '55 min, moderate'"},minutes:{type:"integer"},kcal:{type:"integer",description:"estimated calories burned above resting, for the person described in the instructions"},source:{type:"string",description:"e.g. 'MET 5.0'"}},required:["name","qty","minutes","kcal","source"]};
   tools.push({name:"submit_estimate",description:"Submit the finished estimate for everything described: food as meals, physical activity as exercise. Call this exactly once, after any product lookups.",input_schema:{type:"object",properties:{meals:{type:"array",items:{type:"object",properties:{name:{type:"string",description:"Breakfast, Lunch, Dinner, Snack or Drinks"},items:{type:"array",items:itemSchema}},required:["name","items"]}},exercise:{type:"array",description:"Activities mentioned; empty array if none",items:exSchema},note:{type:"string"},assumption:{type:"string"}},required:["meals","exercise","note","assumption"]}});
   for(let round=0;round<8;round++){
-    const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"content-type":"application/json","x-api-key":cfg.apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:cfg.apiModel||"claude-sonnet-5",max_tokens:6000,system:sys,tools,tool_choice:{type:"any"},messages})});
+    const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"content-type":"application/json","x-api-key":cfg.apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:cfg.apiModel||"claude-sonnet-5-5",max_tokens:6000,system:sys,tools,tool_choice:{type:"any"},messages})});
     if(!r.ok){let m="";try{m=(await r.json()).error?.message||"";}catch{}throw new Error(r.status+" "+m);}
     const j=await r.json();
     if(j.stop_reason==="max_tokens")throw new Error("The reply was cut off — try logging the day in two halves.");
@@ -765,7 +766,7 @@ $("#profileCalc").addEventListener("click",()=>{const p={};$$("#profileForm [dat
   else $("#profileInfo").textContent="Saved. Add age, height and weight to calculate targets.";
   dirtyThenSync();});
 $("#targetsSave").addEventListener("click",()=>{$$("#targetForm input").forEach(i=>S.targets[i.dataset.t]=Math.max(0,Number(i.value)||0));S.targetsUpdated=new Date().toISOString();dirtyThenSync();});
-$("#apiTest").addEventListener("click",async()=>{cfg.apiKey=$("#apiKey").value.trim();cfg.apiModel=$("#apiModel").value.trim()||"claude-sonnet-5";ls.set("intake.cfg",cfg);$("#apiInfo").textContent="Testing…";
+$("#apiTest").addEventListener("click",async()=>{cfg.apiKey=$("#apiKey").value.trim();cfg.apiModel=$("#apiModel").value.trim()||"claude-sonnet-5-5";ls.set("intake.cfg",cfg);$("#apiInfo").textContent="Testing…";
   try{const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"content-type":"application/json","x-api-key":cfg.apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:cfg.apiModel,max_tokens:10,messages:[{role:"user",content:"Reply with OK"}]})});
     if(!r.ok){const j=await r.json().catch(()=>({}));throw new Error(j.error?.message||r.status);} $("#apiInfo").textContent="Key works with "+cfg.apiModel+".";}
   catch(e){$("#apiInfo").textContent="Test failed: "+e.message;} renderSettings();});
